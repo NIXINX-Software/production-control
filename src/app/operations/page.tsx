@@ -8,6 +8,7 @@ import {baseAmount,bankStatusForPayments,EMPTY_OPS,normalUnit,purchaseBalances,p
 import './operations.css';
 
 type Panel='compras'|'recepcion'|'conciliacion'|'catalogos'|'kpis'|'showroom'|'datos';
+type Workspace='admin'|'compras'|'control';
 type Tender={id:string;method:OpsPayment['method'];amount:string};
 const tenderMethods:{value:OpsPayment['method'];label:string}[]=[{value:'cash',label:'Efectivo'},{value:'debit_card',label:'Tarjeta de débito'},{value:'credit_card',label:'Tarjeta de crédito'},{value:'transfer',label:'Transferencia'},{value:'credit_note',label:'Nota de crédito del proveedor'},{value:'other',label:'Otro'}];
 type ViewMode='demo'|'live';
@@ -41,10 +42,11 @@ async function resizeEvidence(input:File):Promise<File>{
  if(blob.size>8*1024*1024)throw new Error('La imagen supera el límite de 8 MB.');
  return new File([blob],`comprobante-${Date.now()}.jpg`,{type:'image/jpeg'});
 }
-export default function Operations(){
- const [tab,setTab]=useState<Panel>('compras'),[mode,setMode]=useState<ViewMode>('demo'),[site,setSite]=useState<OpsSite>('htl');
+export default function Operations({workspace='admin'}:{workspace?:Workspace}){
+ const [tab,setTab]=useState<Panel>(workspace==='control'?'recepcion':'compras'),[mode,setMode]=useState<ViewMode>(workspace==='admin'?'demo':'live'),[site,setSite]=useState<OpsSite>('htl');
  const [scope,setScope]=useState<OpsSite[]>(['htl']),[data,setData]=useState<OpsSnapshot>(EMPTY_OPS);
  const [superadminVerified,setSuperadminVerified]=useState(false);
+ const [workspaceAuthorized,setWorkspaceAuthorized]=useState(false),[workspaceError,setWorkspaceError]=useState('');
  const [showroomAuthorized,setShowroomAuthorized]=useState(false),[showroomData,setShowroomData]=useState<OpsSnapshot|null>(null);
  const [user,setUser]=useState<User|null>(null),[email,setEmail]=useState(''),[password,setPassword]=useState('');
  const [busy,setBusy]=useState(false),[msg,setMsg]=useState(''),[selection,setSelection]=useState('');
@@ -66,9 +68,9 @@ export default function Operations(){
      setUser(account);
      setShowroomAuthorized(false);
      setShowroomData(null);
-     if(!account)setTab(current=>current==='showroom'?'compras':current);
+     if(!account){setWorkspaceAuthorized(false);setTab(workspace==='control'?'recepcion':'compras');}
    });
- },[]);
+ },[workspace]);
  // Showroom credentials are verified independently from the Operations sandbox.
  // The synthetic fixture never ships in the public Operations JavaScript bundle.
  useEffect(()=>{
@@ -95,7 +97,20 @@ export default function Operations(){
    return ()=>{active=false;};
  },[user]);
  useEffect(()=>{
-   if(mode!=='live'||!user)return;
+   if(workspace==='admin'||!user)return;
+   let active=true;
+   user.getIdToken().then(async token=>{
+    const response=await fetch('/api/operations?view=access&site='+site,{headers:{Authorization:'Bearer '+token},cache:'no-store'});
+    const result=await response.json() as {role?:string;error?:string};
+    if(!response.ok)throw new Error(result.error??'No autorizado');
+    if(!(result.role==='admin'||(workspace==='compras'&&result.role==='ops_buyer')||(workspace==='control'&&result.role==='ops_backoffice')))throw new Error('Esta cuenta no tiene acceso a este espacio.');
+    return true;
+   }).then(()=>{if(active){setWorkspaceAuthorized(true);setWorkspaceError('');}})
+     .catch(e=>{if(active){setWorkspaceAuthorized(false);setWorkspaceError(e instanceof Error?e.message:'Acceso denegado');}});
+   return ()=>{active=false;};
+ },[workspace,user,site]);
+ useEffect(()=>{
+   if(mode!=='live'||!user||(workspace!=='admin'&&!workspaceAuthorized))return;
    let cancelled=false;
    user.getIdToken().then(async token=>{
      const response=await fetch('/api/operations?site='+site,{headers:{Authorization:'Bearer '+token},cache:'no-store'});
@@ -104,7 +119,7 @@ export default function Operations(){
      return result.data;
    }).then(result=>{
      if(cancelled)return;
-     setData(result);setSuperadminVerified(true);
+     setData(result);setSuperadminVerified(workspace==='admin');
      setMsg('');
    }).catch(err=>{
      if(cancelled)return;
@@ -112,7 +127,7 @@ export default function Operations(){
      setMsg('No se pudieron cargar los catálogos de Firestore: '+(err instanceof Error?err.message:'error desconocido'));
    });
    return ()=>{cancelled=true;};
- },[mode,user,site]);
+ },[mode,user,site,workspace,workspaceAuthorized]);
  const active=useMemo(()=>filterSite(data,site),[data,site]);
  const purchases=useMemo(()=>data.purchases.filter(p=>scope.includes(p.siteId)),[data,scope]);
  const selected=data.purchases.find(p=>p.id===selection&&p.siteId===site);
@@ -152,7 +167,7 @@ export default function Operations(){
     presentations:requests.flatMap(d=>d.presentations),purchases:requests.flatMap(d=>d.purchases),
     payments:requests.flatMap(d=>d.payments),receipts:requests.flatMap(d=>d.receipts),
     documents:requests.flatMap(d=>d.documents)});
-  setSuperadminVerified(true);
+  setSuperadminVerified(workspace==='admin');
  }
  async function consultHistory(){
   if(!queryFrom||!queryTo||queryFrom>queryTo)throw new Error('Selecciona un periodo válido.');
@@ -328,12 +343,22 @@ export default function Operations(){
  const selectedRows=tab==='showroom'&&showroomVisible?showroomData?.purchases??[]:purchases;
  const showStats=purchaseSummary(selectedRows);
  const currentTitle=demoMode?'DEMOSTRACIÓN EN MEMORIA · CATÁLOGOS VACÍOS':'OPERACIÓN CON AUTENTICACIÓN';
+ const accessReady=workspace==='admin'?showroomAuthorized:workspaceAuthorized;
+ if(!accessReady)return <main className="ops ops-wrap"><section className="ops-card" style={{maxWidth:480,margin:'64px auto'}}>
+  <h1>{workspace==='admin'?'Administración general':workspace==='compras'?'Registro de compras':'Control de recepción y conciliación'}</h1>
+  <p className="ops-hint">Acceso independiente por usuario, función y empresa. Solo Superadmin puede cambiar de área.</p>
+  {user?<><p>Sesión: {user.email}</p><p role="alert">{workspaceError||'Verificando autorización…'}</p><button onClick={()=>void signOut(auth!)}>Cambiar de cuenta</button></>:
+   <div className="ops-auth-form"><label>Correo<input type="email" value={email} onChange={e=>setEmail(e.target.value)}/></label>
+   <label>Contraseña<input type="password" value={password} onChange={e=>setPassword(e.target.value)}/></label>
+   <button disabled={!email||!password||busy} onClick={()=>void work(login)}>Iniciar sesión</button></div>}
+  {msg&&<p role="alert">{msg}</p>}
+ </section></main>;
  return <div className="ops">
   <header className="ops-header"><div className="ops-header-inner">
-   <div><Link href="/" className="ops-back">← Production Control</Link><h1>Business Transformation <span>· Operaciones</span></h1></div>
+   <div>{workspace==='admin'&&<nav className="ops-flex" aria-label="Navegación Superadmin"><Link href="/">Producción y Conteos</Link><Link href="/compras">Compras</Link><Link href="/control-operativo">Control operativo</Link></nav>}<h1>{workspace==='compras'?'Compras':workspace==='control'?'Recepción y conciliación':'Administración general'}</h1></div>
    <div className="ops-header-right"><span className="ops-status">{currentTitle}</span>
-    <select aria-label="Modo de información" value={mode} onChange={e=>{setMode(e.target.value as ViewMode);setData(EMPTY_OPS);setSuperadminVerified(false);setTab('compras');setHistoryLoaded(false);setHistoryOpen(false);setRecentSaved('');setSelection('');setSupplierId('');setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');setMsg('');}}>
-      <option value="demo">Demo segura</option><option value="live">Firestore autorizado</option></select>
+    {workspace==='admin'&&<select aria-label="Modo de información" value={mode} onChange={e=>{setMode(e.target.value as ViewMode);setData(EMPTY_OPS);setSuperadminVerified(false);setTab('compras');setHistoryLoaded(false);setHistoryOpen(false);setRecentSaved('');setSelection('');setSupplierId('');setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');setMsg('');}}>
+      <option value="demo">Demo segura</option><option value="live">Firestore autorizado</option></select>}
    </div>
   </div></header>
   <main className="ops-wrap">
@@ -351,7 +376,7 @@ export default function Operations(){
      <p className="ops-hint">Para operaciones reales, el servidor exige <code>portal_users.opsSiteIds</code> y un proyecto Firebase autorizado. Preview nunca escribe en el Firestore productivo.</p>
    </div>}
    {msg&&<div className="ops-feedback" role="status">{msg}<button onClick={()=>setMsg('')}>×</button></div>}
-   <nav className="ops-tabs" aria-label="Operaciones">{tabs.filter(t=>
+   <nav className="ops-tabs" aria-label="Operaciones">{tabs.filter(t=>workspace==='compras'?t.id==='compras':workspace==='control'?['recepcion','conciliacion','catalogos','kpis'].includes(t.id):
       t.id==='showroom'?showroomVisible:
       t.id==='datos'?(!demoMode&&user&&superadminVerified):true
     ).map(t=><button key={t.id} className={tab===t.id?'active':''} onClick={()=>setTab(t.id)}>{t.title}</button>)}</nav>
@@ -407,7 +432,7 @@ export default function Operations(){
         </div>
         <button disabled={busy} onClick={()=>void work(consultHistory)}>Consultar periodo</button>
         {historyLoaded&&<><p className="ops-hint">{matchedRows.length} compra(s) en el periodo seleccionado</p>
-          <div className="ops-list">{matchedRows.map(p=><button key={p.id} className="ops-purchase" onClick={()=>{setSelection(p.id);setTab('recepcion');}}>
+          <div className="ops-list">{matchedRows.map(p=><button key={p.id} className="ops-purchase" onClick={()=>{setSelection(p.id);if(workspace!=='compras')setTab('recepcion');}}>
             <span><strong>{p.supplierName}</strong><small>{p.purchaseDate}</small></span>
             <span className="ops-purchase-amount"><strong>{cash(p.totalCents)}</strong><small>{status(p.goodsStatus)}</small></span>
           </button>)}</div>
