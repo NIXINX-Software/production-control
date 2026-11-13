@@ -23,9 +23,10 @@ function sourceApp():App{
   credential:cert({projectId:project,clientEmail:creds.client_email,privateKey:creds.private_key.replace(/\\n/g,'\n')})
  },'nixinx-operations-sandbox');
 }
-async function authorized(req:NextRequest,site:unknown){
+async function authorized(req:NextRequest,site:unknown,purpose:'read'|'upload'='read'){
  if(!isOpsSite(site))throw new Error('INVALID_SITE');
  const user=await requireWorkspaceAccess(req,site,['admin','ops_buyer','ops_backoffice']);
+ if(purpose==='upload'&&user.role!=='admin'&&user.role!=='ops_buyer')throw new Error('WORKSPACE_FORBIDDEN');
  const app=sourceApp(),store=getFirestore(app);
  const bucketName=process.env.VERCEL_ENV==='production'?process.env.OPS_EVIDENCE_BUCKET:process.env.OPS_SANDBOX_STORAGE_BUCKET;
  if(!bucketName)throw new Error('OPS_EVIDENCE_BUCKET_NOT_CONFIGURED');
@@ -46,8 +47,7 @@ export async function POST(req:NextRequest){
  try{
   requireSameOrigin(req);
   const form=await req.formData();
-  const {site,actor,role,store,bucket}=await authorized(req,form.get('siteId'));
-  if(role!=='admin'&&role!=='ops_buyer')throw new Error('WORKSPACE_FORBIDDEN');
+  const {site,actor,store,bucket}=await authorized(req,form.get('siteId'),'upload');
   const purchaseId=text(form.get('purchaseId'),130);
   const purchase=(await store.collection('ops_purchases').doc(purchaseId).get()).data();
   if(!purchase||purchase.siteId!==site)throw new Error('INVALID_PURCHASE');
