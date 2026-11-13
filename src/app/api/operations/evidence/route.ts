@@ -1,6 +1,6 @@
 import {NextRequest,NextResponse} from 'next/server';
 import {createHash,randomUUID} from 'node:crypto';
-import {getApps,initializeApp,cert,type App} from 'firebase-admin/app';
+import {getApps,type App} from 'firebase-admin/app';
 import {getFirestore,FieldValue} from 'firebase-admin/firestore';
 import {getStorage} from 'firebase-admin/storage';
 import {db,requireSameOrigin,text} from '@/lib/pc-server';
@@ -8,30 +8,23 @@ import {isOpsSite,type OpsSite} from '@/lib/ops-contract';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
 const SIZE_LIMIT=8*1024*1024;
-function sourceApp():App{
- if(process.env.VERCEL_ENV==='production'){
-  if(process.env.OPS_PRODUCTION_ENABLED!=='true')throw new Error('OPS_RELEASE_DISABLED');
-  db();
-  return getApps().find(a=>a.name==='[DEFAULT]')!;
- }
- const raw=process.env.OPS_SANDBOX_SERVICE_ACCOUNT_KEY,project=process.env.OPS_SANDBOX_PROJECT_ID;
- if(!raw||!project)throw new Error('OPS_SANDBOX_NOT_CONFIGURED');
- const creds=JSON.parse(raw) as {project_id:string;client_email:string;private_key:string};
- if(creds.project_id!==project)throw new Error('OPS_SANDBOX_PROJECT_MISMATCH');
- return getApps().find(a=>a.name==='nixinx-operations-sandbox')??initializeApp({
-  credential:cert({projectId:project,clientEmail:creds.client_email,privateKey:creds.private_key.replace(/\\n/g,'\n')})
- },'nixinx-operations-sandbox');
+function sourceApp():App {
+ if(process.env.VERCEL_ENV!=='production')throw new Error('OPS_PREVIEW_DISABLED');
+ db();
+ const app=getApps().find(a=>a.name==='[DEFAULT]');
+ if(!app)throw new Error('FIREBASE_APP_NOT_INITIALIZED');
+ return app;
 }
 async function authorized(_req:NextRequest,site:unknown,_purpose:'read'|'upload'='read'){
  if(!isOpsSite(site))throw new Error('INVALID_SITE');
  const app=sourceApp(),store=getFirestore(app);
- const bucketName=process.env.VERCEL_ENV==='production'?process.env.OPS_EVIDENCE_BUCKET:process.env.OPS_SANDBOX_STORAGE_BUCKET;
+ const bucketName=process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
  if(!bucketName)throw new Error('OPS_EVIDENCE_BUCKET_NOT_CONFIGURED');
  return {site:site as OpsSite,actor:'operations-station',store,bucket:getStorage(app).bucket(bucketName)};
 }
 function problem(e:unknown){
  const message=e instanceof Error?e.message:'UPLOAD_ERROR';
- const status=message==='ADMIN_AUTH_REQUIRED'?401:message==='OPS_SITE_FORBIDDEN'||message==='WORKSPACE_SITE_FORBIDDEN'||message==='WORKSPACE_FORBIDDEN'||message==='SUPERADMIN_REQUIRED'||message==='ADMIN_ROLE_REQUIRED'?403:message.endsWith('NOT_CONFIGURED')||message==='OPS_RELEASE_DISABLED'?503:400;
+ const status=message==='ADMIN_AUTH_REQUIRED'?401:message==='OPS_SITE_FORBIDDEN'||message==='WORKSPACE_SITE_FORBIDDEN'||message==='WORKSPACE_FORBIDDEN'||message==='SUPERADMIN_REQUIRED'||message==='ADMIN_ROLE_REQUIRED'?403:message.endsWith('NOT_CONFIGURED')||message==='OPS_PREVIEW_DISABLED'?503:400;
  return NextResponse.json({error:message},{status,headers:{'Cache-Control':'no-store'}});
 }
 function isImage(b:Buffer,mime:string){
