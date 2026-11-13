@@ -1,0 +1,41 @@
+name: Hot Tacos - Operations (feature preview)
+on:
+  push:
+    branches: ['feat/ops-*']
+permissions:
+  contents: read
+concurrency:
+  group: nixinx-operations-preview-${{ github.sha }}
+  cancel-in-progress: false
+jobs:
+  deploy_preview:
+    if: startsWith(github.ref_name, 'feat/ops-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN_HOT_TACOS_LEAMINGTON_PRODUCTION_CONTROL }}
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID_HOT_TACOS_PRODUCTION_CONTROL }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_HOT_TACOS_LEAMINGTON_PRODUCTION_CONTROL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify preview target
+        shell: bash
+        run: |
+          test -n "$VERCEL_TOKEN" && test -n "$VERCEL_ORG_ID" && test -n "$VERCEL_PROJECT_ID" || (echo 'Missing Vercel target credentials' >&2; exit 1)
+      - name: Vercel CLI
+        run: npm install --global vercel@latest
+      - name: Pull PREVIEW configuration only
+        run: vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
+      - name: Build PREVIEW (no --prod)
+        run: vercel build --token="$VERCEL_TOKEN"
+      - name: Publish PREVIEW (no --prod)
+        shell: bash
+        run: |
+          URL="$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")"
+          echo "VERCEL_PREVIEW_URL=$URL" >> "$GITHUB_ENV"
+          echo "### NIXINX Operations Preview" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Preview: $URL/operations" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "No production deploy. Operations writes require independent sandbox credentials." >> "$GITHUB_STEP_SUMMARY"
+          echo "PREVIEW_URL=$URL/operations"
