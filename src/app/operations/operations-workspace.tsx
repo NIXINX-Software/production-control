@@ -61,6 +61,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  const [newSupplier,setNewSupplier]=useState(''),[newProduct,setNewProduct]=useState(''),[productUnit,setProductUnit]=useState<'kg'|'l'|'unit'>('kg');
  const [editingProduct,setEditingProduct]=useState<string|null>(null),[catalogSearch,setCatalogSearch]=useState('');
  const [presentationProduct,setPresentationProduct]=useState(''),[newPresentationLabel,setNewPresentationLabel]=useState('');
+ const [editingPresentation,setEditingPresentation]=useState<string|null>(null);
  const [packCount,setPackCount]=useState(''),[packUnit,setPackUnit]=useState<OpsUnit>('g');
  const [receivingProduct,setReceivingProduct]=useState(''),[receivingPresentation,setReceivingPresentation]=useState(''),[receivedPacks,setReceivedPacks]=useState(''),[lineCost,setLineCost]=useState('');
  const [receptionState,setReceptionState]=useState<'partial'|'received'>('received');
@@ -231,10 +232,17 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
   if(!presentationProductObj)throw new Error('Selecciona el producto maestro.');
   const n=Number(packCount);
   if(!newPresentationLabel.trim()||!Number.isFinite(n)||n<=0||normalUnit(packUnit)!==presentationProductObj.unit)throw new Error('Presentación o unidad inválida.');
-  if(mode==='live'){const r=await request('presentation.add',{productId:presentationProductObj.id,label:newPresentationLabel,packCount:n,packUnit});await refreshLive();if(r.id)setReceivingPresentation(r.id);}
-  else{const id=genId(site),p:OpsPresentation={id,siteId:site,productId:presentationProductObj.id,label:newPresentationLabel.trim(),packCount:n,packUnit,unitAmount:baseAmount(n,packUnit),unit:presentationProductObj.unit,active:true};
-    setData(d=>({...d,presentations:[...d.presentations,p]}));setReceivingPresentation(id);}
-  setNewPresentationLabel('');setInlineNewPresentation(false);
+  if(mode==='live'){const r=await request(editingPresentation?'presentation.update':'presentation.add',{...(editingPresentation?{presentationId:editingPresentation}:{productId:presentationProductObj.id}),label:newPresentationLabel,packCount:n,packUnit});await refreshLive();if(r.id)setReceivingPresentation(r.id);}
+  else{const id=editingPresentation??genId(site),p:OpsPresentation={id,siteId:site,productId:presentationProductObj.id,label:newPresentationLabel.trim(),packCount:n,packUnit,unitAmount:baseAmount(n,packUnit),unit:presentationProductObj.unit,active:true};
+    if(editingPresentation&&data.receipts.some(r=>r.presentationId===id))throw new Error('PRESENTATION_IN_USE_CREATE_NEW_INSTEAD');
+    setData(d=>({...d,presentations:editingPresentation?d.presentations.map(row=>row.id===id?p:row):[...d.presentations,p]}));setReceivingPresentation(id);}
+  setNewPresentationLabel('');setInlineNewPresentation(false);setEditingPresentation(null);
+ }
+ async function removePresentation(p:OpsPresentation,kind:'delete'|'deactivate'){
+  if(!window.confirm(kind==='delete'?`¿Eliminar definitivamente ${p.label}?`:`¿Desactivar ${p.label}?`))return;
+  if(mode==='live'){await request(kind==='delete'?'presentation.delete':'presentation.deactivate',{presentationId:p.id});await refreshLive();}
+  else{if(kind==='delete'&&data.receipts.some(r=>r.presentationId===p.id))throw new Error('PRESENTATION_IN_USE_DEACTIVATE_INSTEAD');setData(d=>({...d,presentations:kind==='delete'?d.presentations.filter(x=>x.id!==p.id):d.presentations.map(x=>x.id===p.id?{...x,active:false}:x)}));}
+  if(editingPresentation===p.id){setEditingPresentation(null);setNewPresentationLabel('');}
  }
  async function addPurchase(){
   const cents=Math.round(Number(total.replace(',','.'))*100);
@@ -570,16 +578,15 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
     <section className="ops-card"><h2>Presentaciones por producto</h2>
      <label>Producto maestro<select value={presentationProduct} onChange={e=>{setPresentationProduct(e.target.value);const p=active.products.find(x=>x.id===e.target.value);if(p)setPackUnit(p.unit);}}>
       <option value="">Selecciona producto</option>{active.products.filter(p=>p.active).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-     <div className="ops-mini-list">{active.presentations.filter(p=>p.productId===presentationProduct).map(p=><div key={p.id}>
-       {p.label}<small>{p.unitAmount} {p.unit} por paquete</small></div>)}</div>
+     <div className="ops-mini-list ops-catalog-products">{active.presentations.filter(p=>p.productId===presentationProduct).map(p=><div key={p.id}><span><strong>{p.label}</strong><small>{p.packCount} {uLabel[p.packUnit]} = {p.unitAmount} {p.unit} · {p.active?'Activa':'Inactiva'}</small></span><span className="ops-catalog-actions"><button type="button" disabled={busy} onClick={()=>{setEditingPresentation(p.id);setNewPresentationLabel(p.label);setPackCount(String(p.packCount));setPackUnit(p.packUnit);}}>Editar</button>{p.active&&<button type="button" disabled={busy} onClick={()=>void work(()=>removePresentation(p,'deactivate'))}>Desactivar</button>}<button type="button" disabled={busy} onClick={()=>void work(()=>removePresentation(p,'delete'))}>Eliminar</button></span></div>)}</div>
      <div className="ops-divider"/>
-     <h3>Crear nueva presentación</h3>
+     <h3>{editingPresentation?'Editar equivalencia':'Crear presentación o equivalencia'}</h3>
      <label>Nombre de presentación<input value={newPresentationLabel} onChange={e=>setNewPresentationLabel(e.target.value)} placeholder="Ej. Bolsa de 750 g"/></label>
      <div className="ops-grid-2"><label>Contenido del paquete<input type="number" min="0.001" step="any" value={packCount} onChange={e=>setPackCount(e.target.value)}/></label>
       <label>Unidad<select value={packUnit} onChange={e=>setPackUnit(e.target.value as OpsUnit)}>
        {eligibleUnits.map(u=><option key={u} value={u}>{uLabel[u]}</option>)}</select></label></div>
-     <button disabled={busy||!presentationProduct||!newPresentationLabel.trim()} onClick={()=>void work(addPresentation)}>+ Guardar presentación</button>
-     <p className="ops-hint">Las presentaciones se reutilizan al recibir mercancía; puedes crear nuevas sin duplicar el producto maestro.</p>
+     <button disabled={busy||!presentationProduct||!newPresentationLabel.trim()||!(Number(packCount)>0)} onClick={()=>void work(addPresentation)}>{editingPresentation?'Guardar cambios':'+ Guardar presentación'}</button>{editingPresentation&&<button type="button" onClick={()=>{setEditingPresentation(null);setNewPresentationLabel('');setPackCount('');}}>Cancelar edición</button>}
+     <p className="ops-hint">Las equivalencias físicas (kg, g, lb, L, mL, piezas) son fijas. Las presentaciones se pueden crear, editar o desactivar por producto. Una equivalencia ya utilizada en una recepción no puede modificarse ni eliminarse.</p>
     </section>
    </div>}
    {(tab==='kpis'||(tab==='showroom'&&showroomVisible))&&<section className="ops-card">
