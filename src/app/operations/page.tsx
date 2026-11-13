@@ -315,7 +315,7 @@ export default function Operations(){
    </div>}
    {msg&&<div className="ops-feedback" role="status">{msg}<button onClick={()=>setMsg('')}>×</button></div>}
    <nav className="ops-tabs" aria-label="Operaciones">{tabs.filter(t=>t.id!=='datos'||(!demoMode&&user&&superadminVerified)).map(t=><button key={t.id} className={tab===t.id?'active':''} onClick={()=>setTab(t.id)}>{t.title}</button>)}</nav>
-   {tab==='compras'&&<div className="ops-layout">
+   {tab==='compras'&&<div className="ops-capture-layout">
     <section className="ops-card ops-purchase-form">
      <h2>Nueva compra</h2><p className="ops-hint">Registra el proveedor, importe, cómo se pagó y fotografía el ticket. El detalle de artículos se captura en Recepción.</p>
      <label>Proveedor<select value={supplierId} onChange={e=>setSupplierId(e.target.value)}><option value="">Seleccionar proveedor</option>
@@ -326,19 +326,23 @@ export default function Operations(){
        <button disabled={busy||newSupplier.trim().length<2} onClick={()=>void work(addSupplier)}>Guardar y seleccionar proveedor</button>
      </div>}
      <div className="ops-grid-2"><label>Fecha<input type="date" value={purchaseDate} onChange={e=>setPurchaseDate(e.target.value)}/></label>
-      <label>Total de la compra (CAD)<input type="number" min="0.01" step="0.01" inputMode="decimal" value={total} onChange={e=>setTotal(e.target.value)}/></label></div>
-     <div className="ops-payments-title"><h3>¿Cómo se pagó?</h3><button type="button" onClick={()=>setTenders(p=>[...p,{id:crypto.randomUUID(),method:'cash',amount:'',reference:''}])}>+ Agregar medio de pago</button></div>
-     {tenders.length===0&&<p className="ops-hint">Si se compró completamente a crédito, deja esta sección vacía. Podrás registrar el pago cuando se liquide la deuda.</p>}
-     <div className="ops-tender-rows">{tenders.map((p,i)=><div key={p.id} className="ops-tender">
-      <div className="ops-tender-heading"><strong>Pago {i+1}</strong><button type="button" aria-label={"Eliminar pago "+(i+1)} onClick={()=>setTenders(rows=>rows.filter(x=>x.id!==p.id))}>Eliminar</button></div>
-      <div className="ops-grid-2"><label>Medio<select value={p.method} onChange={e=>setTenders(rows=>rows.map(x=>x.id===p.id?{...x,method:e.target.value as OpsPayment['method']}:x))}>
-       {tenderMethods.map(m=><option key={m.value} value={m.value}>{m.label}</option>)}</select></label>
-       <label>Importe (CAD)<input type="number" min="0.01" step="0.01" inputMode="decimal" placeholder="0.00" value={p.amount} onChange={e=>setTenders(rows=>rows.map(x=>x.id===p.id?{...x,amount:e.target.value}:x))}/></label></div>
-      <label>Referencia / nota (opcional)<input placeholder="Ej. tarjeta terminación 1234" value={p.reference} onChange={e=>setTenders(rows=>rows.map(x=>x.id===p.id?{...x,reference:e.target.value}:x))}/></label>
-     </div>)}</div>
-     <div className="ops-payment-summary"><div><span>Total</span><strong>{Number.isFinite(draftCents)?cash(draftCents):'—'}</strong></div>
-      <div><span>Pagos / notas aplicadas</span><strong>{Number.isFinite(tenderTotalCents)?cash(tenderTotalCents):'—'}</strong></div>
-      <div><span>Saldo a crédito</span><strong>{Number.isFinite(draftBalance)?cash(draftBalance):'—'}</strong></div></div>
+      <label>Total de la compra (CAD)<input type="text" inputMode="decimal" placeholder="0.00" value={total} onChange={e=>setTotal(e.target.value)}/></label></div>
+     <div className="ops-payments-title"><h3>Formas de pago</h3><button type="button" onClick={()=>setTenders(rows=>[...rows,{id:crypto.randomUUID(),method:'cash',amount:''}])}>+ Otro medio</button></div>
+     <div className="ops-payments-compact">
+       {tenders.map(p=><div className="ops-payment-line" key={p.id}>
+        <label>Medio<select aria-label="Medio de pago" value={p.method} onChange={e=>setTenders(rows=>rows.map(x=>x.id===p.id?{...x,method:e.target.value as OpsPayment['method']}:x))}>
+         {tenderMethods.map(m=><option key={m.value} value={m.value}>{m.label}</option>)}</select></label>
+        <label>Importe (CAD)<input aria-label="Importe de este pago" type="text" inputMode="decimal" placeholder="0.00" value={p.amount} onChange={e=>setTenders(rows=>rows.map(x=>x.id===p.id?{...x,amount:e.target.value}:x))}/></label>
+        <button className="ops-delete-tender" type="button" aria-label="Eliminar medio de pago" onClick={()=>setTenders(rows=>rows.filter(x=>x.id!==p.id))}>×</button>
+       </div>)}
+     </div>
+     {tenders.length===0&&<p className="ops-hint">Sin pago inicial: la compra queda a crédito. Agrega los medios que sí se usaron.</p>}
+     <div className="ops-payment-summary ops-payment-summary-compact">
+       <div><span>Compra</span><strong>{draftCents>0?cash(draftCents):'—'}</strong></div>
+       <div><span>Pagos registrados</span><strong>{Number.isFinite(tenderTotalCents)?cash(tenderTotalCents):'—'}</strong></div>
+       {draftCents>0&&draftBalance>0&&<div className="ops-remaining"><span>Saldo pendiente (crédito)</span><strong>{cash(draftBalance)}</strong></div>}
+       {draftCents>0&&draftBalance===0&&<div className="ops-remaining"><span>Compra cubierta</span><strong>✓</strong></div>}
+     </div>
      {draftBalance>0&&<label>Plazo de pago (días)<input type="number" min="0" max="365" step="1" value={terms} onChange={e=>setTerms(e.target.value)}/></label>}
      {draftBalance<0&&<p className="ops-error">Los pagos no pueden superar el total de la compra.</p>}
      <div className="ops-receipt-picker">
@@ -349,25 +353,27 @@ export default function Operations(){
       <label className="ops-inline-check"><input type="checkbox" checked={receiptDeliveredAtPurchase} onChange={e=>setReceiptDeliveredAtPurchase(e.target.checked)}/> Ya entregué el comprobante</label>
      </div>
      <label>Observaciones (opcional)<textarea rows={2} placeholder="Comentarios de la compra" value={notes} onChange={e=>setNotes(e.target.value)}/></label>
-     <button className="ops-primary" disabled={busy||!supplierId||!Number.isFinite(draftBalance)||draftBalance<0||draftCents<1} onClick={()=>void work(addPurchase)}>{busy?'Guardando…':'Guardar compra'}</button>
+     <button className="ops-primary" disabled={busy||!supplierId||!Number.isFinite(draftBalance)||draftBalance<0||draftCents<1||tenders.some(p=>!p.amount.trim())} onClick={()=>void work(addPurchase)}>{busy?'Guardando…':'Guardar compra'}</button>
     </section>
-    <section className="ops-card ops-purchases-panel">
-     <div className="ops-section-title"><h2>Compras registradas</h2><span className="ops-count">{active.purchases.length}</span></div>
-     <p className="ops-hint">Selecciona una compra para consultar su recibo. La recepción de artículos y la conciliación se hacen en sus propias pestañas.</p>
-     <div className="ops-list">{active.purchases.map(p=><button key={p.id} className={'ops-purchase '+(selected?.id===p.id?'selected':'')} onClick={()=>setSelection(p.id)}>
-       <span><strong>{p.supplierName}</strong><small>{p.purchaseDate} · {p.id.slice(0,16)}</small></span>
-       <span className="ops-purchase-amount"><strong>{cash(p.totalCents)}</strong><small>{p.balanceCents>0?'Crédito '+cash(p.balanceCents):'Pagado'}</small></span>
-     </button>)}</div>
-     {!active.purchases.length&&<p className="ops-hint">Aún no hay compras para esta empresa.</p>}
-     {selected&&<div className="ops-compact-status">
-      <h3>Seguimiento · {selected.supplierName}</h3>
-      <label className="ops-inline-check"><input type="checkbox" checked={selected.receiptDelivered===true||selected.documentStatus==='delivered'||selected.documentStatus==='received'} disabled={busy||selected.documentCount===0||selected.receiptDelivered===true||selected.documentStatus==='received'} onChange={e=>{if(e.target.checked)void work(()=>changeDocument('delivered',selected));}}/> Comprobante entregado</label>
-      <p className="ops-hint">{selected.documentCount} imagen(es) · Mercancía: {status(selected.goodsStatus)} · Comprobante: {status(selected.documentStatus)}</p>
-      {selected.documentCount===0&&<><label>Agregar comprobante pendiente<input type="file" accept="image/*" capture="environment" onChange={e=>setExistingEvidence(e.target.files?.[0]??null)}/></label>
-       <button disabled={busy||!existingEvidence} onClick={()=>void work(uploadFile)}>Guardar imagen comprimida</button></>}
-      {!demoMode&&<div className="ops-mini-list">{active.documents.filter(d=>d.purchaseId===selected.id).map((d,i)=>
-       <div key={d.id}><span>Imagen {i+1}</span><button onClick={()=>void work(()=>viewEvidence(d.id))}>Ver comprobante</button></div>)}</div>}
-     </div>}
+    {recentSaved&&<p role="status" className="ops-saved-notice">{recentSaved}</p>}
+    <section className="ops-purchase-search">
+      <button className="ops-search-toggle" type="button" onClick={()=>{setHistoryOpen(v=>!v);setHistoryLoaded(false);}}>
+        <span>Consultar compras anteriores</span><span aria-hidden="true">{historyOpen?'−':'+'}</span>
+      </button>
+      {historyOpen&&<div className="ops-search-body">
+        <div className="ops-grid-2">
+          <label>Desde<input type="date" value={queryFrom} onChange={e=>{setQueryFrom(e.target.value);setHistoryLoaded(false);}}/></label>
+          <label>Hasta<input type="date" value={queryTo} onChange={e=>{setQueryTo(e.target.value);setHistoryLoaded(false);}}/></label>
+        </div>
+        <button disabled={busy} onClick={()=>void work(consultHistory)}>Consultar periodo</button>
+        {historyLoaded&&<><p className="ops-hint">{matchedRows.length} compra(s) en el periodo seleccionado</p>
+          <div className="ops-list">{matchedRows.map(p=><button key={p.id} className="ops-purchase" onClick={()=>{setSelection(p.id);setTab('recepcion');}}>
+            <span><strong>{p.supplierName}</strong><small>{p.purchaseDate}</small></span>
+            <span className="ops-purchase-amount"><strong>{cash(p.totalCents)}</strong><small>{status(p.goodsStatus)}</small></span>
+          </button>)}</div>
+          {matchedRows.length===0&&<p className="ops-hint">No se encontraron compras en este periodo.</p>}
+        </>}
+      </div>}
     </section>
    </div>}
    {tab==='recepcion'&&<div className="ops-layout">
