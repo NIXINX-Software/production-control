@@ -1,6 +1,5 @@
 import {NextRequest,NextResponse} from 'next/server';
-import {getApps,initializeApp,cert} from 'firebase-admin/app';
-import {getFirestore,FieldValue,type Firestore} from 'firebase-admin/firestore';
+import {FieldValue,type Firestore} from 'firebase-admin/firestore';
 import {db,requireSameOrigin,requireSuperAdmin,text} from '@/lib/pc-server';
 import {csvExport} from '@/lib/pc-operational-files';
 import {
@@ -9,22 +8,11 @@ import {
 } from '@/lib/ops-contract';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
-const sandboxName='nixinx-operations-sandbox';
 const MAX_RESULTS=200;
-
-/** Preview is NOT allowed to use the live Production Control Firestore for Operations. */
+/** Reuse the existing Production Control Firebase Admin connection. Preview never receives production data or writes. */
 function operationsStore():Firestore {
-  if(process.env.VERCEL_ENV==='production'){
-    if(process.env.OPS_PRODUCTION_ENABLED!=='true')throw new Error('OPS_RELEASE_DISABLED');
-    return db();
-  }
-  if(process.env.OPS_SANDBOX_PROJECT_ID===undefined||!process.env.OPS_SANDBOX_SERVICE_ACCOUNT_KEY)throw new Error('OPS_SANDBOX_NOT_CONFIGURED');
-  const config=JSON.parse(process.env.OPS_SANDBOX_SERVICE_ACCOUNT_KEY) as {project_id:string;client_email:string;private_key:string};
-  if(config.project_id!==process.env.OPS_SANDBOX_PROJECT_ID)throw new Error('OPS_SANDBOX_PROJECT_MISMATCH');
-  const app=getApps().find(a=>a.name===sandboxName)??initializeApp({credential:cert({
-    projectId:config.project_id,clientEmail:config.client_email,privateKey:config.private_key.replace(/\\n/g,'\n')
-  })},sandboxName);
-  return getFirestore(app);
+  if(process.env.VERCEL_ENV!=='production')throw new Error('OPS_PREVIEW_DISABLED');
+  return db();
 }
 async function authorize(request:NextRequest,site:unknown,exporting=false):Promise<{site:OpsSite;actor:string;store:Firestore}>{
   if(!isOpsSite(site))throw new Error('INVALID_SITE');
@@ -38,7 +26,7 @@ const docId=(site:OpsSite)=>site+'_'+crypto.randomUUID();
 function fail(error:unknown){
  const message=error instanceof Error?error.message:'OPS_ERROR';
  const status=message==='ADMIN_AUTH_REQUIRED'?401:message==='SUPERADMIN_REQUIRED'||message==='ADMIN_ROLE_REQUIRED'||message==='OPS_SITE_FORBIDDEN'||message==='FORBIDDEN'?403:
-   message==='CONFLICT'||message==='PAYMENT_EXCEEDS_TOTAL'?409:message.includes('NOT_CONFIGURED')||message==='OPS_RELEASE_DISABLED'?503:400;
+   message==='CONFLICT'||message==='PAYMENT_EXCEEDS_TOTAL'?409:message.includes('NOT_CONFIGURED')||message==='OPS_PREVIEW_DISABLED'?503:400;
  console.error('NIXINX Operations:',message);
  return NextResponse.json({error:message},{status,headers:{'Cache-Control':'no-store'}});
 }
