@@ -1,16 +1,18 @@
 name: Hot Tacos - NIXINX Operations (PR Preview)
 on:
+  push:
+    branches: ['feat/ops-*']
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened]
 permissions:
   contents: read
 concurrency:
-  group: nixinx-operations-pr-preview-${{ github.event.pull_request.number }}
+  group: nixinx-operations-preview-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 jobs:
   deploy_preview:
-    if: startsWith(github.head_ref, 'feat/ops-') && github.event.pull_request.head.repo.full_name == github.repository
+    if: (github.event_name == 'push' && startsWith(github.ref_name, 'feat/ops-')) || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'feat/ops-') && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
