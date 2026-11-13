@@ -145,3 +145,12 @@
  .ops-payment-line label{font-size:10px}
  .ops button.ops-delete-tender{font-size:18px;height:42px;min-height:42px}
 }
+
+/* Receiving: keep quantity and amount input baselines aligned despite wrapping labels. */
+.ops-receive-amount-row{align-items:stretch}
+.ops-receive-amount-row>label{display:flex;flex-direction:column;justify-content:flex-end;min-width:0}
+.ops-receive-amount-row>label>input{margin-top:auto}
+.ops-duplicate-hint{font-size:12px;line-height:1.5;color:#7f4520;background:#fff8eb;border:1px solid #f1debc;padding:9px 11px;border-radius:9px}
+@media(max-width:600px){
+ .ops-receive-amount-row>label>input{margin-top:0}
+}
