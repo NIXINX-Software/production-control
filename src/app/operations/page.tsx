@@ -152,25 +152,43 @@ export default function Operations(){
   setNewPresentationLabel('');setInlineNewPresentation(false);
  }
  async function addPurchase(){
-  const cents=Math.round(Number(total)*100),payCents=Math.round(Number(initialPay||0)*100);
-  if(!supplier||!Number.isSafeInteger(cents)||cents<1||!Number.isSafeInteger(payCents)||payCents<0)throw new Error('Selecciona proveedor e importes válidos.');
-  const b=purchaseBalances(cents,payCents?[payCents]:[]);
-  const days=Number(terms);
-  if(!Number.isInteger(days)||days<0||days>365)throw new Error('Plazo de crédito inválido.');
-  const payments=payCents?[{amountCents:payCents,method:initialMethod}]:[];
-  if(mode==='live'){
-   const r=await request('purchase.add',{supplierId:supplier.id,totalCents:cents,purchaseDate,termsDays:days,initialPayments:payments,notes});
-   await refreshLive();if(r.id)setSelection(r.id);
-  }else{
-   const id=genId(site),due=b.balanceCents?new Date(Date.parse(purchaseDate+'T12:00:00Z')+days*86400000).toISOString().slice(0,10):null;
-   const row:OpsPurchase={id,siteId:site,purchaseDate,supplierId:supplier.id,supplierName:supplier.name,totalCents:cents,currency:'CAD',
-     ...b,dueDate:due,goodsStatus:'pending',documentStatus:'missing',bankStatus:bankStatusForPayments(payments.map(p=>p.method)),
-     receiptCount:0,documentCount:0,notes};
-   const payment:OpsPayment[]=payCents?[{id:genId(site),siteId:site,purchaseId:id,amountCents:payCents,method:initialMethod,
-    reconciliationStatus:initialMethod==='cash'?'not_applicable':'pending',paidDate:purchaseDate}]:[];
-   setData(d=>({...d,purchases:[row,...d.purchases],payments:[...d.payments,...payment]}));setSelection(id);
+  const cents=Math.round(Number(total)*100);
+  if(!supplier||!Number.isSafeInteger(cents)||cents<1)throw new Error('Selecciona un proveedor y un importe válido.');
+  const payments:{method:OpsPayment['method'];amountCents:number;reference:string}[]=[];
+  for(const p of tenders){
+   const amountCents=Math.round(Number(p.amount)*100);
+   if(!Number.isSafeInteger(amountCents)||amountCents<=0)throw new Error('Captura un importe válido en cada medio de pago.');
+   payments.push({method:p.method,amountCents,reference:p.reference.trim()});
   }
-  setNotes('');setInitialPay('0');setTab('compras');
+  const b=purchaseBalances(cents,payments.map(p=>p.amountCents));
+  const days=Number(terms);
+  if(!Number.isInteger(days)||days<0||days>365)throw new Error('El plazo de crédito debe estar entre 0 y 365 días.');
+  if(receiptDeliveredAtPurchase&&!evidence)throw new Error('Adjunta el comprobante antes de marcarlo como entregado.');
+  if(mode==='live'){
+   const result=await request('purchase.add',{supplierId:supplier.id,totalCents:cents,purchaseDate,termsDays:days,initialPayments:payments,notes});
+   if(!result.id)throw new Error('La compra no devolvió identificador.');
+   setSelection(result.id);
+   await refreshLive();
+   if(evidence){
+    try{
+     await uploadFileFor(result.id,evidence);
+     if(receiptDeliveredAtPurchase){await request('document.status',{purchaseId:result.id,status:'delivered',recipient:user?.email||'Compras'});await refreshLive();}
+    }catch(error){throw new Error('La compra '+result.id+' se guardó, pero el comprobante quedó pendiente: '+(error instanceof Error?error.message:String(error))+'. Selecciona la compra y vuelve a adjuntarlo.');}
+   }
+  }else{
+   const id=genId(site);
+   const due=b.balanceCents?new Date(Date.parse(purchaseDate+'T12:00:00Z')+days*86400000).toISOString().slice(0,10):null;
+   const row:OpsPurchase={id,siteId:site,purchaseDate,supplierId:supplier.id,supplierName:supplier.name,totalCents:cents,
+     currency:'CAD',...b,dueDate:due,goodsStatus:'pending',documentStatus:evidence?(receiptDeliveredAtPurchase?'delivered':'captured'):'missing',
+     bankStatus:bankStatusForPayments(payments.map(p=>p.method)),receiptCount:0,documentCount:evidence?1:0,
+     receiptDelivered:receiptDeliveredAtPurchase,receiptAcknowledged:false,notes};
+   const rows:OpsPayment[]=payments.map(p=>({id:genId(site),siteId:site,purchaseId:id,amountCents:p.amountCents,method:p.method,
+     reference:p.reference,reconciliationStatus:['cash','credit_note'].includes(p.method)?'not_applicable':'pending',paidDate:purchaseDate}));
+   setData(d=>({...d,purchases:[row,...d.purchases],payments:[...d.payments,...rows],
+     documents:evidence?[...d.documents,{id:genId(site),siteId:site,purchaseId:id,storagePath:'demo:image-resized-locally',mime:'image/jpeg',size:evidence.size}]:d.documents}));
+   setSelection(id);
+  }
+  setNotes('');setTenders([]);setEvidence(null);setReceiptDeliveredAtPurchase(false);
  }
  async function addPayment(){
   if(!selected)throw new Error('Selecciona una compra.');
@@ -179,25 +197,27 @@ export default function Operations(){
   if(mode==='live'){await request('payment.add',{purchaseId:selected.id,amountCents:cents,method:payMethod,paidDate:dateToday()});await refreshLive();}
   else{
    const row:OpsPayment={id:genId(site),siteId:site,purchaseId:selected.id,amountCents:cents,method:payMethod,
-     reconciliationStatus:payMethod==='cash'?'not_applicable':'pending',paidDate:dateToday()};
+     reconciliationStatus:['cash','credit_note'].includes(payMethod)?'not_applicable':'pending',paidDate:dateToday()};
    setData(d=>({...d,payments:[...d.payments,row]}));
    setChange(selected.id,{paidCents:selected.paidCents+cents,balanceCents:selected.balanceCents-cents,
-     bankStatus:payMethod==='cash'?selected.bankStatus:'pending_reconciliation'});
+     bankStatus:['cash','credit_note'].includes(payMethod)?selected.bankStatus:'pending_reconciliation'});
   }
   setPayAmount('');
  }
  async function addReceipt(){
   if(!selected||!currentPresentation)throw new Error('Selecciona una compra y una presentación.');
-  const n=Number(receivedPacks);
+  const n=Number(receivedPacks),costCents=lineCost.trim()?Math.round(Number(lineCost)*100):null;
+  if(costCents!==null&&(!Number.isSafeInteger(costCents)||costCents<0))throw new Error('El costo de esta línea debe ser un importe válido.');
   if(!Number.isFinite(n)||n<=0)throw new Error('Indica cuántos paquetes llegaron.');
-  if(mode==='live'){await request('receipt.add',{purchaseId:selected.id,presentationId:currentPresentation.id,packQuantity:n,goodsStatus:receptionState});await refreshLive();}
+  if(mode==='live'){await request('receipt.add',{purchaseId:selected.id,presentationId:currentPresentation.id,packQuantity:n,lineTotalCents:costCents,goodsStatus:receptionState});await refreshLive();}
   else{
    const product=active.products.find(p=>p.id===currentPresentation.productId)!;
    setData(d=>({...d,receipts:[...d.receipts,{id:genId(site),siteId:site,purchaseId:selected.id,
       presentationId:currentPresentation.id,presentationLabel:currentPresentation.label,productId:product.id,productName:product.name,
-      packQuantity:n,receivedBaseAmount:Math.round(n*currentPresentation.unitAmount*1e6)/1e6,unit:currentPresentation.unit}]}));
+      packQuantity:n,receivedBaseAmount:Math.round(n*currentPresentation.unitAmount*1e6)/1e6,unit:currentPresentation.unit,lineTotalCents:costCents}]}));
    setChange(selected.id,{goodsStatus:receptionState,receiptCount:selected.receiptCount+1});
   }
+  setLineCost('');
  }
  async function verifyGoods(){
   if(!selected||selected.goodsStatus!=='received'||selected.receiptCount<1||verifier.trim().length<2)throw new Error('Selecciona una recepción completa y escribe el responsable de la validación.');
@@ -216,26 +236,29 @@ export default function Operations(){
    if(popup)popup.location.replace(result.url);else window.location.assign(result.url);
   }catch(e){popup?.close();throw e;}
  }
- async function uploadFile(){
-  if(!selected||!evidence)throw new Error('Selecciona una imagen y una compra.');
+ async function uploadFileFor(purchaseId:string,file:File){
+  const compressed=await resizeEvidence(file);
   if(mode==='live'){
    if(!user)throw new Error('Inicia sesión para subir comprobantes.');
-   const form=new FormData();form.append('siteId',site);form.append('purchaseId',selected.id);form.append('file',evidence);
+   const form=new FormData();form.append('siteId',site);form.append('purchaseId',purchaseId);form.append('file',compressed);
    const token=await user.getIdToken();
    const resp=await fetch('/api/operations/evidence',{method:'POST',headers:{Authorization:'Bearer '+token},body:form});
    const ans=await resp.json() as {error?:string};
-   if(!resp.ok)throw new Error(ans.error||'Error guardando comprobante.');
+   if(!resp.ok)throw new Error(ans.error||'Error guardando el comprobante.');
    await refreshLive();
   }else{
-   setData(d=>({...d,documents:[...d.documents,{id:genId(site),siteId:site,purchaseId:selected.id,storagePath:'demo:'+evidence.name,mime:evidence.type,size:evidence.size}]}));
-   setChange(selected.id,{documentCount:selected.documentCount+1,documentStatus:'captured'});
+   setData(d=>({...d,documents:[...d.documents,{id:genId(site),siteId:site,purchaseId,storagePath:'demo:local-compressed-image',mime:compressed.type,size:compressed.size}],
+     purchases:d.purchases.map(p=>p.id===purchaseId?{...p,documentCount:p.documentCount+1,documentStatus:'captured'}:p)}));
   }
-  setEvidence(null);
  }
- async function changeDocument(next:'delivered'|'received'|'rejected'){
-  if(!selected||recipient.trim().length<2)throw new Error('Indica la persona responsable de la entrega/recepción.');
-  if(mode==='live'){await request('document.status',{purchaseId:selected.id,status:next,recipient});await refreshLive();}
-  else setChange(selected.id,{documentStatus:next});
+ async function uploadFile(){
+  if(!selected||!evidence)throw new Error('Selecciona una imagen y una compra.');
+  await uploadFileFor(selected.id,evidence);setEvidence(null);
+ }
+ async function changeDocument(next:'delivered'|'received'|'rejected',purchase:OpsPurchase|undefined=selected){
+  if(!purchase)throw new Error('Selecciona una compra.');
+  if(mode==='live'){await request('document.status',{purchaseId:purchase.id,status:next,recipient:recipient.trim()||user?.email||'Compras'});await refreshLive();}
+  else setChange(purchase.id,{documentStatus:next,receiptDelivered:next==='delivered'||next==='received',receiptAcknowledged:next==='received'});
   setRecipient('');
  }
  async function login(){if(!auth)throw new Error('Firebase Auth no está configurado.');await signInWithEmailAndPassword(auth,email,password);setPassword('');}
