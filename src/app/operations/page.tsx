@@ -119,6 +119,31 @@ export default function Operations(){
     documents:requests.flatMap(d=>d.documents)});
   setSuperadminVerified(true);
  }
+ async function consultHistory(){
+  if(!queryFrom||!queryTo||queryFrom>queryTo)throw new Error('Selecciona un periodo válido.');
+  const days=Math.round((Date.parse(queryTo)-Date.parse(queryFrom))/86400000);
+  if(days>366)throw new Error('El periodo máximo de consulta es de 12 meses.');
+  if(mode==='live'){
+   if(!user)throw new Error('Inicia sesión para consultar compras.');
+   const token=await user.getIdToken();
+   const url='/api/operations?view=history&site='+site+'&from='+encodeURIComponent(queryFrom)+'&to='+encodeURIComponent(queryTo);
+   const response=await fetch(url,{headers:{Authorization:'Bearer '+token},cache:'no-store'});
+   const body=await response.json() as {purchases?:OpsPurchase[];hasMore?:boolean;error?:string};
+   if(!response.ok||!body.purchases)throw new Error(body.error||'Consulta fallida.');
+   setData(current=>({...current,purchases:[...current.purchases.filter(p=>p.siteId!==site),...body.purchases!]}));
+   if(body.hasMore)setMsg('El periodo contiene más de 200 compras: ajusta las fechas para evitar omisiones.');
+  }
+  setHistoryLoaded(true);
+ }
+ const matchedRows=active.purchases.filter(p=>p.purchaseDate>=queryFrom&&p.purchaseDate<=queryTo)
+  .sort((a,b)=>b.purchaseDate.localeCompare(a.purchaseDate)||b.id.localeCompare(a.id));
+ const bankLabel=(p:OpsPurchase)=>{
+   const payRows=data.payments.filter(row=>row.purchaseId===p.id);
+   if(p.balanceCents===p.totalCents)return 'Crédito sin pago';
+   if(p.bankStatus==='not_applicable'||payRows.length>0&&payRows.every(x=>x.reconciliationStatus==='not_applicable'))return 'Sin cargo bancario';
+   return 'Pendiente de statement';
+ };
+ const bankVerified=(p:OpsPurchase)=>p.bankStatus==='reconciled';
  async function work(job:()=>Promise<void>){setBusy(true);setMsg('');try{await job();setMsg('Operación completada.');}
   catch(e){setMsg('No se completó: '+(e instanceof Error?e.message:String(e)));}finally{setBusy(false);}}
  function chooseSite(v:OpsSite){setSite(v);setScope([v]);setSuperadminVerified(false);if(tab==='datos')setTab('compras');setSelection('');setSupplierId('');setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');setHistoryLoaded(false);setHistoryOpen(false);setRecentSaved('');}
@@ -180,7 +205,7 @@ export default function Operations(){
      documents:evidence?[...d.documents,{id:genId(site),siteId:site,purchaseId:id,storagePath:'demo:image-resized-locally',mime:'image/jpeg',size:evidence.size}]:d.documents}));
    setSelection(id);
   }
-  setNotes('');setTotal('');setTenders([]);setEvidence(null);setReceiptDeliveredAtPurchase(false);setRecentSaved('Compra registrada. Podrás encontrarla desde una consulta por fechas.');
+  setNotes('');setTotal('');setTenders([]);setEvidence(null);setReceiptDeliveredAtPurchase(false);setRecentSaved('Compra guardada. Para consultarla o hacer seguimiento utiliza un periodo de fechas.');setHistoryLoaded(false);
  }
  async function addPayment(){
   if(!selected)throw new Error('Selecciona una compra.');
