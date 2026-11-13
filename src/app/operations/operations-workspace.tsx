@@ -138,11 +138,21 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
    return ()=>{cancelled=true;};
  },[mode,user,site,workspace,workspaceAuthorized]);
  useEffect(()=>{
-   if(mode!=='live')return;
    let current=true;
+   const onlyActiveForSite=(orders:OpsOrder[])=>orders.filter(o=>o.siteId===site&&o.status==='approved');
+   if(mode==='demo'){
+    // OrderWorkspace keeps isolated demo orders in sessionStorage; show them in the purchase form too.
+    try{
+     const raw=sessionStorage.getItem('ops:orders:demo:'+site);
+     const parsed=raw?JSON.parse(raw) as {orders?:OpsOrder[]}:null;
+     setPurchaseOrderOptions(onlyActiveForSite(Array.isArray(parsed?.orders)?parsed.orders:[]));
+    }catch{setPurchaseOrderOptions([]);}
+    return ()=>{current=false;};
+   }
    fetch('/api/operations/orders?view=orders&site='+site,{cache:'no-store'}).then(async r=>{
-    if(!r.ok)return {orders:[]};return await r.json() as {orders?:OpsOrder[]};
-   }).then(r=>{if(current)setPurchaseOrderOptions((r.orders??[]).filter(o=>o.status==='approved'));})
+    if(!r.ok)throw new Error('No se pudieron consultar las órdenes autorizadas.');
+    return await r.json() as {orders?:OpsOrder[]};
+   }).then(r=>{if(current)setPurchaseOrderOptions(onlyActiveForSite(r.orders??[]));})
      .catch(()=>{if(current)setPurchaseOrderOptions([]);});
    return ()=>{current=false;};
  },[site,mode,tab]);
@@ -211,7 +221,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  const bankVerified=(p:OpsPurchase)=>p.bankStatus==='reconciled';
  async function work(job:()=>Promise<void>){setBusy(true);setMsg('');try{await job();setMsg(current=>current||'Operación completada.');}
   catch(e){setMsg('No se completó: '+(e instanceof Error?e.message:String(e)));}finally{setBusy(false);}}
- function chooseSite(v:OpsSite){setWorkspaceAuthorized(false);setWorkspaceRole(null);setSite(v);setScope([v]);setSuperadminVerified(false);if(tab==='datos')setTab('compras');setSelection('');setSupplierId('');setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');setHistoryLoaded(false);setHistoryOpen(false);setRecentSaved('');}
+ function chooseSite(v:OpsSite){setWorkspaceAuthorized(false);setWorkspaceRole(null);setSite(v);setScope([v]);setSuperadminVerified(false);if(tab==='datos')setTab('compras');setSelection('');setSupplierId('');setPurchaseOrderId('');setPurchaseOrderOptions([]);setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');setHistoryLoaded(false);setHistoryOpen(false);setRecentSaved('');}
  async function addSupplier(){
   if(newSupplier.trim().length<2)throw new Error('Escribe el nombre del proveedor.');
   if(mode==='live'){const result=await request('supplier.add',{name:newSupplier});await refreshLive();if(result.id)setSupplierId(result.id);}
@@ -275,6 +285,8 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
   const days=terms.trim()?Number(terms):null;
   if(days!==null&&(!Number.isInteger(days)||days<1||days>365))throw new Error('El plazo de crédito debe ser de 1 a 365 días o dejarse en blanco.');
   if(receiptDeliveredAtPurchase&&!evidence)throw new Error('Adjunta el comprobante antes de marcarlo como entregado.');
+  if(purchaseOrderId&&!purchaseOrderOptions.some(o=>o.id===purchaseOrderId&&o.siteId===site&&o.status==='approved'))
+   throw new Error('Selecciona una orden de compra autorizada de esta empresa o deja la compra sin orden.');
   if(mode==='live'){
    const result=await request('purchase.add',{supplierId:supplier.id,totalCents:cents,purchaseDate,termsDays:days,initialPayments:payments,notes,orderId:purchaseOrderId||null});
    if(!result.id)throw new Error('La compra no devolvió identificador.');
@@ -425,7 +437,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
   <header className="ops-header"><div className="ops-header-inner">
    <div>{canNavigate&&<nav className="ops-flex" aria-label="Navegación Superadmin"><Link href="/">Producción y Conteos</Link><Link href="/compras">Compras</Link><Link href="/control-operativo">Control operativo</Link><Link href="/operations">Administración general</Link></nav>}<h1>{workspace==='compras'?'Compras':workspace==='control'?'Recepción y conciliación':'Administración general'}</h1></div>
    <div className="ops-header-right"><span className="ops-status">{currentTitle}</span>
-    {workspace==='admin'&&<select aria-label="Modo de información" value={mode} onChange={e=>{setMode(e.target.value as ViewMode);setData(EMPTY_OPS);setSuperadminVerified(false);setTab('compras');setHistoryLoaded(false);setHistoryOpen(false);setRecentSaved('');setSelection('');setSupplierId('');setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');setMsg('');}}>
+    {workspace==='admin'&&<select aria-label="Modo de información" value={mode} onChange={e=>{setMode(e.target.value as ViewMode);setData(EMPTY_OPS);setSuperadminVerified(false);setTab('compras');setHistoryLoaded(false);setHistoryOpen(false);setRecentSaved('');setSelection('');setSupplierId('');setPurchaseOrderId('');setPurchaseOrderOptions([]);setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');setMsg('');}}>
       <option value="demo">Demo segura</option><option value="live">Firestore autorizado</option></select>}
    </div>
   </div></header>
@@ -455,10 +467,19 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
      <h2>Nueva compra</h2>
      <label>Proveedor<select value={supplierId} onChange={e=>setSupplierId(e.target.value)}><option value="">Seleccionar proveedor</option>
        {active.suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-     {purchaseOrderOptions.length>0&&<details className="ops-purchase-extra"><summary>Vincular a una orden aprobada (opcional)</summary>
-        <label>Orden de compra<select value={purchaseOrderId} onChange={e=>setPurchaseOrderId(e.target.value)}>
-         <option value="">Compra sin orden previa</option>{purchaseOrderOptions.map(o=><option key={o.id} value={o.id}>{o.folio}</option>)}
-        </select></label></details>}
+     <div className="ops-purchase-order-field">
+       <label>Orden de compra relacionada (opcional)
+        <select aria-label="Orden de compra relacionada" value={purchaseOrderId} onChange={e=>setPurchaseOrderId(e.target.value)}>
+         <option value="">Sin orden de compra — compra directa</option>
+         {purchaseOrderOptions.map(o=><option key={o.id} value={o.id}>{o.folio}</option>)}
+        </select>
+       </label>
+       <p className="ops-hint">{purchaseOrderId
+         ?'El ticket se guardará en la carpeta de esta orden, bajo su fecha y empresa.'
+         :purchaseOrderOptions.length===0
+          ?'Sin órdenes autorizadas disponibles. Puedes registrar una compra directa.'
+          :'Selecciona el folio autorizado; para una compra directa, deja «Sin orden de compra».'}</p>
+     </div>
       <div className="ops-quick-add"><button type="button" onClick={()=>setInlineNewSupplier(p=>!p)}>{inlineNewSupplier?'Cancelar':'+ Proveedor'}</button></div>
      {inlineNewSupplier&&<div className="ops-inline-editor">
        <label>Nombre del proveedor<input value={newSupplier} onChange={e=>setNewSupplier(e.target.value)} placeholder="Ej. Proveedor local"/></label>
