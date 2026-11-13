@@ -50,7 +50,7 @@ export default function Operations(){
  const [busy,setBusy]=useState(false),[msg,setMsg]=useState(''),[selection,setSelection]=useState('htl_demo_credit');
  const [supplierId,setSupplierId]=useState('htl_charro'),[total,setTotal]=useState('500'),[purchaseDate,setPurchaseDate]=useState(dateToday());
  const [terms,setTerms]=useState('30'),[tenders,setTenders]=useState<Tender[]>([]),[notes,setNotes]=useState('');
- const [receiptDeliveredAtPurchase,setReceiptDeliveredAtPurchase]=useState(false),[inlineNewProduct,setInlineNewProduct]=useState(false),[inlineNewPresentation,setInlineNewPresentation]=useState(false);
+ const [receiptDeliveredAtPurchase,setReceiptDeliveredAtPurchase]=useState(false),[inlineNewSupplier,setInlineNewSupplier]=useState(false),[inlineNewProduct,setInlineNewProduct]=useState(false),[inlineNewPresentation,setInlineNewPresentation]=useState(false);
  const [payAmount,setPayAmount]=useState(''),[payMethod,setPayMethod]=useState<OpsPayment['method']>('transfer');
  const [recipient,setRecipient]=useState(''),[evidence,setEvidence]=useState<File|null>(null),[existingEvidence,setExistingEvidence]=useState<File|null>(null);
  const [newSupplier,setNewSupplier]=useState(''),[newProduct,setNewProduct]=useState(''),[productUnit,setProductUnit]=useState<'kg'|'l'|'unit'>('kg');
@@ -122,9 +122,9 @@ export default function Operations(){
  function chooseSite(v:OpsSite){setSite(v);setScope([v]);setSuperadminVerified(false);if(tab==='datos')setTab('compras');setSelection('');setSupplierId('');setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');}
  async function addSupplier(){
   if(newSupplier.trim().length<2)throw new Error('Escribe el nombre del proveedor.');
-  if(mode==='live'){await request('supplier.add',{name:newSupplier});await refreshLive();}
+  if(mode==='live'){const result=await request('supplier.add',{name:newSupplier});await refreshLive();if(result.id)setSupplierId(result.id);}
   else {const id=genId(site);setData(d=>({...d,suppliers:[...d.suppliers,{id,siteId:site,name:newSupplier.trim(),active:true}]}));setSupplierId(id);}
-  setNewSupplier('');
+  setNewSupplier('');setInlineNewSupplier(false);
  }
  async function addProduct(){
   if(newProduct.trim().length<2)throw new Error('Escribe el nombre del producto.');
@@ -293,6 +293,11 @@ export default function Operations(){
      <h2>Nueva compra</h2><p className="ops-hint">Registra el proveedor, importe, cómo se pagó y fotografía el ticket. El detalle de artículos se captura en Recepción.</p>
      <label>Proveedor<select value={supplierId} onChange={e=>setSupplierId(e.target.value)}><option value="">Seleccionar proveedor</option>
        {active.suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+     <div className="ops-quick-add"><button type="button" onClick={()=>setInlineNewSupplier(p=>!p)}>{inlineNewSupplier?'Cancelar':'+ Crear proveedor'}</button></div>
+     {inlineNewSupplier&&<div className="ops-inline-editor">
+       <label>Nombre del proveedor<input value={newSupplier} onChange={e=>setNewSupplier(e.target.value)} placeholder="Ej. Proveedor local"/></label>
+       <button disabled={busy||newSupplier.trim().length<2} onClick={()=>void work(addSupplier)}>Guardar y seleccionar proveedor</button>
+     </div>}
      <div className="ops-grid-2"><label>Fecha<input type="date" value={purchaseDate} onChange={e=>setPurchaseDate(e.target.value)}/></label>
       <label>Total de la compra (CAD)<input type="number" min="0.01" step="0.01" inputMode="decimal" value={total} onChange={e=>setTotal(e.target.value)}/></label></div>
      <div className="ops-payments-title"><h3>¿Cómo se pagó?</h3><button type="button" onClick={()=>setTenders(p=>[...p,{id:crypto.randomUUID(),method:'cash',amount:'',reference:''}])}>+ Agregar medio de pago</button></div>
