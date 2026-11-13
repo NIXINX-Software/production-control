@@ -476,7 +476,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
      {tenders.length===0&&<p className="ops-hint">Sin pago inicial: la compra queda a crédito. Agrega los medios que sí se usaron.</p>}
      <div className="ops-payment-summary ops-payment-summary-compact">
        <div><span>Compra</span><strong>{draftCents>0?cash(draftCents):'—'}</strong></div>
-       <div><span>Pagos registrados</span><strong>{Number.isFinite(tenderTotalCents)?cash(tenderTotalCents):'—'}</strong></div>
+       <div><span>Pagos efectivamente realizados</span><strong>{Number.isFinite(monetaryTenderCents)?cash(monetaryTenderCents):'—'}</strong></div>
        {draftCents>0&&draftBalance>0&&<div className="ops-remaining"><span>Saldo pendiente (crédito)</span><strong>{cash(draftBalance)}</strong></div>}
        {draftCents>0&&draftBalance===0&&<div className="ops-remaining"><span>Compra cubierta</span><strong>✓</strong></div>}
      </div>
