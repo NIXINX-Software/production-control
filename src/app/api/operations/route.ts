@@ -96,22 +96,22 @@ export async function POST(req:NextRequest){
     if(!validMoneyCents(totalCents)||!opsDate(date)||!Number.isSafeInteger(termsDays)||termsDays<0||termsDays>365||payments.length>15)throw new Error('INVALID_PURCHASE');
     const supplier=(await store.collection('ops_suppliers').doc(supplierId).get()).data();
     if(!supplier||supplier.siteId!==site||supplier.active!==true)throw new Error('INVALID_SUPPLIER');
-    const normalized: {method:OpsPayment['method'];amountCents:number}[]=[];
+    const normalized: {method:OpsPayment['method'];amountCents:number;reference:string}[]=[];
     for(const pay of payments){
-      if(!isRecord(pay)||!['cash','card','transfer','other'].includes(String(pay.method))||!validMoneyCents(pay.amountCents))throw new Error('INVALID_PAYMENTS');
-      normalized.push({method:pay.method as OpsPayment['method'],amountCents:pay.amountCents});
+      if(!isRecord(pay)||!['cash','debit_card','credit_card','credit_note','card','transfer','other'].includes(String(pay.method))||!validMoneyCents(pay.amountCents))throw new Error('INVALID_PAYMENTS');
+      normalized.push({method:pay.method as OpsPayment['method'],amountCents:pay.amountCents,reference:text(pay.reference,100)});
     }
     const {paidCents,balanceCents}=purchaseBalances(totalCents,normalized.map(p=>p.amountCents));
     const dueDate=balanceCents>0?new Date(Date.parse(date+'T12:00:00Z')+termsDays*86400000).toISOString().slice(0,10):null;
     const id=docId(site),purchaseRef=store.collection('ops_purchases').doc(id),batch=store.batch();
     batch.create(purchaseRef,{siteId:site,purchaseDate:date,supplierId,supplierName:supplier.name,totalCents,
       currency:'CAD',paidCents,balanceCents,dueDate,goodsStatus:'pending',documentStatus:'missing',
-      bankStatus:bankStatusForPayments(normalized.map(p=>p.method)),receiptCount:0,documentCount:0,notes:text(body.notes,600),
+      bankStatus:bankStatusForPayments(normalized.map(p=>p.method)),receiptCount:0,documentCount:0,receiptDelivered:false,receiptAcknowledged:false,notes:text(body.notes,600),
       createdBy:actor,createdAt:now,updatedAt:now,contractVersion:'ops.purchases.v0.1'});
     for(const pay of normalized){
       const paymentRef=store.collection('ops_payments').doc(docId(site));
-      batch.create(paymentRef,{siteId:site,purchaseId:id,amountCents:pay.amountCents,method:pay.method,
-        reconciliationStatus:pay.method==='cash'?'not_applicable':'pending',paidDate:date,createdBy:actor,createdAt:now});
+      batch.create(paymentRef,{siteId:site,purchaseId:id,amountCents:pay.amountCents,method:pay.method,reference:pay.reference,
+        reconciliationStatus:['cash','credit_note'].includes(pay.method)?'not_applicable':'pending',paidDate:date,createdBy:actor,createdAt:now});
     }
     batch.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId:id,action:'purchase.created',actor,createdAt:now});
     await batch.commit();
@@ -119,14 +119,14 @@ export async function POST(req:NextRequest){
   }
   if(action==='payment.add'){
     const id=text(body.purchaseId,130),amount=body.amountCents,method=body.method,date=body.paidDate;
-    if(!validMoneyCents(amount)||!opsDate(date)||!['cash','card','transfer','other'].includes(String(method)))throw new Error('INVALID_PAYMENT');
+    if(!validMoneyCents(amount)||!opsDate(date)||!['cash','debit_card','credit_card','credit_note','card','transfer','other'].includes(String(method)))throw new Error('INVALID_PAYMENT');
     const ref=store.collection('ops_purchases').doc(id),payment=store.collection('ops_payments').doc(docId(site));
     await store.runTransaction(async tx=>{
       const snapshot=await tx.get(ref),p=snapshot.data();
       if(!p||p.siteId!==site||p.cancelled===true)throw new Error('INVALID_PURCHASE');
       if(amount>p.balanceCents)throw new Error('PAYMENT_EXCEEDS_TOTAL');
-      tx.create(payment,{siteId:site,purchaseId:id,amountCents:amount,method,reconciliationStatus:method==='cash'?'not_applicable':'pending',paidDate:date,createdAt:now,createdBy:actor});
-      tx.update(ref,{paidCents:p.paidCents+amount,balanceCents:p.balanceCents-amount,bankStatus:method==='cash'?(p.bankStatus==='awaiting_payment'?'not_applicable':p.bankStatus):'pending_reconciliation',updatedAt:now});
+      tx.create(payment,{siteId:site,purchaseId:id,amountCents:amount,method,reference:text(body.reference,100),reconciliationStatus:['cash','credit_note'].includes(String(method))?'not_applicable':'pending',paidDate:date,createdAt:now,createdBy:actor});
+      tx.update(ref,{paidCents:p.paidCents+amount,balanceCents:p.balanceCents-amount,bankStatus:['cash','credit_note'].includes(String(method))?(p.bankStatus==='awaiting_payment'?'not_applicable':p.bankStatus):'pending_reconciliation',updatedAt:now});
       tx.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId:id,action:'payment.registered',amountCents:amount,method,actor,createdAt:now});
     });
     return NextResponse.json({ok:true,id:payment.id});
@@ -144,14 +144,14 @@ export async function POST(req:NextRequest){
     return NextResponse.json({ok:true});
   }
   if(action==='document.status'){
-    const id=text(body.purchaseId,130),status=body.status,recipient=text(body.recipient,120);
-    if(!['delivered','received','rejected'].includes(String(status))||invalid(recipient))throw new Error('INVALID_HANDOFF');
+    const id=text(body.purchaseId,130),status=body.status,recipient=text(body.recipient,120)||actor;
+    if(!['delivered','received','rejected'].includes(String(status)))throw new Error('INVALID_HANDOFF');
     const ref=store.collection('ops_purchases').doc(id);
     await store.runTransaction(async tx=>{
       const doc=await tx.get(ref),p=doc.data();
       if(!p||p.siteId!==site||!['captured','delivered','received','rejected'].includes(p.documentStatus))throw new Error('INVALID_DOCUMENT_STATE');
       if((status==='received'||status==='rejected')&&p.documentStatus!=='delivered'||status==='delivered'&&!['captured','rejected'].includes(p.documentStatus))throw new Error('INVALID_DOCUMENT_STATE');
-      tx.update(ref,{documentStatus:status,updatedAt:now});
+      tx.update(ref,{documentStatus:status,receiptDelivered:status==='delivered'||status==='received',receiptAcknowledged:status==='received',updatedAt:now});
       tx.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId:id,action:'document.'+status,recipient,actor,createdAt:now});
     });
     return NextResponse.json({ok:true});
