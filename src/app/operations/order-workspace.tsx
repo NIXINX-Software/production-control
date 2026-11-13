@@ -248,9 +248,18 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
      </div>)}</div>
     <div className="ops-payment-summary"><div><span>Subtotal estimado</span><strong>{money(estimateSubtotal)}</strong></div></div>
     <label>Presupuesto solicitado (CAD)<input inputMode="decimal" type="number" min="0.01" step="0.01" value={budget} onChange={e=>setBudget(e.target.value)}/></label>
-    <div className="ops-grid-2"><label>Mínimo (%)<input type="number" min="0" max="100" value={minPct} onChange={e=>setMinPct(e.target.value)}/></label>
-     <label>Máximo (%)<input type="number" min="100" max="300" value={maxPct} onChange={e=>setMaxPct(e.target.value)}/></label></div>
-    <p className="ops-hint">Importe autorizado propuesto: de {money(budgetBounds?.minBudgetCents)} a {money(budgetBounds?.maxBudgetCents)}.</p>
+    <h3>Margen autorizado sobre el presupuesto solicitado</h3>
+    <div className="ops-grid-2 ops-budget-sliders">
+     <label>Porcentaje mínimo: <strong>{minPct}%</strong>
+      <input aria-label="Porcentaje mínimo autorizado" type="range" min="0" max="100" step="5" value={minPct} onChange={e=>setMinPct(e.target.value)}/>
+      <strong>{money(budgetBounds?.minBudgetCents)}</strong>
+     </label>
+     <label>Porcentaje máximo: <strong>{maxPct}%</strong>
+      <input aria-label="Porcentaje máximo autorizado" type="range" min="100" max="300" step="5" value={maxPct} onChange={e=>setMaxPct(e.target.value)}/>
+      <strong>{money(budgetBounds?.maxBudgetCents)}</strong>
+     </label>
+    </div>
+    <p className="ops-hint">Controles independientes: cada barra tiene su propia escala y no modifica la otra. Rango permitido: {money(budgetBounds?.minBudgetCents)} – {money(budgetBounds?.maxBudgetCents)}.</p>
     <label>Nombre del responsable que captura<input placeholder="Nombre" value={name} onChange={e=>setName(e.target.value)}/></label>
     <button className="ops-primary" disabled={busy||!lines.length||!(budgetCents>0)} onClick={()=>void act(saveOrder)}>{revisionId?'Guardar revisión':'Crear propuesta'}</button>
    </div>
