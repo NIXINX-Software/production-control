@@ -7,11 +7,13 @@ export type OpsOrderLine={
  id:string;productId:string;productName:string;unit:OpsUnit;quantity:number;
  requestedBaseAmount:number;unitCostCents:number|null;estimateCents:number|null;
  suppliedBaseAmount:number;supplyStatus:OpsSupplyStatus;note?:string;
+ requestedCents?:number;lineApprovals?:Partial<Record<OpsApprovalArea,OpsOrderApproval>>;
+ ownerAccepted?:boolean;ownerLineComment?:string;
 };
 export type OpsOrderApproval={name:string;at:string;revision:number};
 export type OpsOrder={
  id:string;siteId:OpsSite;folio:string;status:OpsOrderStatus;createdAt?:unknown;updatedAt?:unknown;
- revision:number;from:string;to:string;lines:OpsOrderLine[];
+ revision:number;from:string;to:string;requiredDate?:string;lines:OpsOrderLine[];
  estimatedSubtotalCents:number|null;requestedBudgetCents:number;minPercent:number;maxPercent:number;
  minBudgetCents:number;maxBudgetCents:number;
  approvals:Partial<Record<OpsApprovalArea,OpsOrderApproval>>;
