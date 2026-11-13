@@ -61,7 +61,6 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  const [historyOpen,setHistoryOpen]=useState(false),[historyLoaded,setHistoryLoaded]=useState(false),[recentSaved,setRecentSaved]=useState('');
  const [queryFrom,setQueryFrom]=useState(()=>{const d=new Date();d.setDate(d.getDate()-30);return d.toLocaleDateString('en-CA',{timeZone:'America/Toronto'});}),[queryTo,setQueryTo]=useState(dateToday());
  const [receiptDeliveredAtPurchase,setReceiptDeliveredAtPurchase]=useState(false),[inlineNewSupplier,setInlineNewSupplier]=useState(false),[inlineNewProduct,setInlineNewProduct]=useState(false),[inlineNewPresentation,setInlineNewPresentation]=useState(false);
- const [payAmount,setPayAmount]=useState(''),[payMethod,setPayMethod]=useState<OpsPayment['method']>('transfer');
  const [recipient,setRecipient]=useState(''),[evidence,setEvidence]=useState<File|null>(null),[existingEvidence,setExistingEvidence]=useState<File|null>(null);
  const [newSupplier,setNewSupplier]=useState(''),[newProduct,setNewProduct]=useState(''),[productUnit,setProductUnit]=useState<'kg'|'l'|'unit'>('kg');
  const [editingProduct,setEditingProduct]=useState<string|null>(null),[catalogSearch,setCatalogSearch]=useState('');
@@ -320,20 +319,6 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
   if(mode==='live'){await request('purchase.cancel',{purchaseId:p.id,reason:reason.trim()});await refreshLive();}
   else setData(d=>({...d,purchases:d.purchases.map(x=>x.id===p.id?{...x,cancelled:true}:x)}));
   setEditingPurchase('');setMsg('Compra cancelada; historial conservado.');
- }
- async function addPayment(){
-  if(!selected)throw new Error('Selecciona una compra.');
-  const cents=Math.round(Number(payAmount)*100);
-  if(!Number.isSafeInteger(cents)||cents<=0||cents>selected.balanceCents)throw new Error('El abono debe ser mayor que cero y no superar la deuda.');
-  if(mode==='live'){await request('payment.add',{purchaseId:selected.id,amountCents:cents,method:payMethod,paidDate:dateToday()});await refreshLive();}
-  else{
-   const row:OpsPayment={id:genId(site),siteId:site,purchaseId:selected.id,amountCents:cents,method:payMethod,
-     reconciliationStatus:['cash','credit_note'].includes(payMethod)?'not_applicable':'pending',paidDate:dateToday()};
-   setData(d=>({...d,payments:[...d.payments,row]}));
-   setChange(selected.id,{paidCents:selected.paidCents+cents,balanceCents:selected.balanceCents-cents,
-     bankStatus:['cash','credit_note'].includes(payMethod)?selected.bankStatus:'pending_reconciliation'});
-  }
-  setPayAmount('');
  }
  async function addReceipt(){
   if(!selected||!currentPresentation)throw new Error('Selecciona una compra y una presentación.');
@@ -606,16 +591,16 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
        <tbody>{matchedRows.map(p=><tr key={p.id}>
         <td data-label="Compra"><strong>{p.supplierName}</strong><small>{p.purchaseDate} · {p.folio??p.id.slice(0,12)}</small></td>
         <td data-label="Total"><strong>{cash(p.totalCents)}</strong>{p.balanceCents>0&&<small>Saldo {cash(p.balanceCents)}</small>}</td>
-        <td data-label="Ticket entregado"><input type="checkbox" disabled readOnly checked={p.receiptDelivered===true||['delivered','received'].includes(p.documentStatus)} aria-label="Ticket entregado" title="Se marca al registrar la entrega del ticket"/></td>
+        <td data-label="Ticket entregado"><input type="checkbox" disabled={busy||Boolean(p.cancelled)} checked={p.receiptDelivered===true||['delivered','received'].includes(p.documentStatus)} onChange={e=>void work(()=>setDocumentCheck(p,e.target.checked?'delivered':p.documentCount>0?'captured':'missing'))} aria-label="Ticket entregado" title="Corregir entrega del ticket"/></td>
         <td data-label="Mercancía recibida"><input type="checkbox" disabled readOnly checked={['received','verified'].includes(p.goodsStatus)} aria-label="Mercancía recibida" title="Según la recepción física registrada"/></td>
-        <td data-label="Ticket recibido"><input type="checkbox" disabled readOnly checked={p.receiptAcknowledged===true||p.documentStatus==='received'} aria-label="Ticket recibido" title="Acuse del responsable de recepción"/></td>
+        <td data-label="Ticket recibido"><input type="checkbox" disabled={busy||Boolean(p.cancelled)} checked={p.receiptAcknowledged===true||p.documentStatus==='received'} onChange={e=>void work(()=>setDocumentCheck(p,e.target.checked?'received':'delivered'))} aria-label="Ticket recibido" title="Acuse o corrección del ticket original"/></td>
         <td data-label="Banco conciliado">{bankLabel(p)==='Crédito sin pago'||bankLabel(p)==='Sin cargo bancario'?<span className="ops-not-applicable">{bankLabel(p)}</span>:
-         <label className="ops-bank-cell"><input type="checkbox" disabled readOnly checked={bankVerified(p)} aria-label="Transacción bancaria conciliada" title="Solo una conciliación verificada con el statement podrá completar esta etapa"/><small>{bankVerified(p)?'Conciliado':'Pendiente'}</small></label>}</td>
+         <label className="ops-bank-cell"><input type="checkbox" disabled={busy||Boolean(p.cancelled)} checked={bankVerified(p)} onChange={e=>void work(()=>setBankStatus(p,e.target.checked))} aria-label="Transacción bancaria conciliada" title="Confirmación con referencia y responsable tras verificar el estado de cuenta"/><small>{bankVerified(p)?'Conciliado':'Pendiente'}</small></label>}</td>
         <td data-label="Detalle"><button className="ops-row-action" type="button" onClick={()=>setSelection(p.id)}>Detalle</button></td>
        </tr>)}</tbody>
       </table></div>}
       {matchedRows.length===0&&<p className="ops-hint">No hay compras en este periodo. Prueba otras fechas.</p>}
-      <p className="ops-hint">Los checkboxes son indicadores de estado, no controles para inventar una entrega o una conciliación. Los movimientos bancarios sin compra respaldada se identificarán al implementar la importación del statement.</p>
+      <p className="ops-hint">Las confirmaciones del ticket son editables y auditadas. La conciliación bancaria requiere verificación manual del estado de cuenta, referencia y nombre del responsable. La importación automática de statements queda pendiente.</p>
      </div>:<div className="ops-awaiting-query"><strong>Consulta por periodo</strong><p>Elige las fechas y pulsa Consultar. No se carga un historial indefinido automáticamente.</p></div>}
      {historyLoaded&&selected&&matchedRows.some(p=>p.id===selected.id)&&<div className="ops-transaction-details">
       <div className="ops-section-title"><h3>Detalle · {selected.supplierName}</h3><button onClick={()=>setSelection('')}>Cerrar</button></div>
@@ -624,13 +609,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
        <div><span>Pagos registrados</span><strong>{cash(selected.paidCents)}</strong></div>
        <div><span>Saldo por pagar</span><strong>{cash(selected.balanceCents)}</strong></div>
       </div>
-      <h3>Registrar abono de una compra a crédito</h3>
-      <div className="ops-grid-2">
-       <label>Importe del abono (CAD)<input type="number" inputMode="decimal" min="0.01" step="0.01" value={payAmount} onChange={e=>setPayAmount(e.target.value)}/></label>
-       <label>Medio de pago<select value={payMethod} onChange={e=>setPayMethod(e.target.value as OpsPayment['method'])}>{tenderMethods.map(m=><option key={m.value} value={m.value}>{m.label}</option>)}</select></label>
-      </div>
-      <button disabled={busy||selected.balanceCents<=0} onClick={()=>void work(addPayment)}>Aplicar abono</button>
-      <p className="ops-hint">Registrar el abono disminuye la deuda. No marca automáticamente el movimiento como conciliado en el banco.</p>
+      <p className="ops-hint">Para pagar saldos acumulados utiliza «Cuentas por proveedor». Los abonos se registran por proveedor, no por ticket.</p>
      </div>}
     </section>}
    {tab==='catalogos'&&<div className="ops-layout">
