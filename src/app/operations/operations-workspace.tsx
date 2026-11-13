@@ -141,12 +141,15 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
    let current=true;
    const onlyActiveForSite=(orders:OpsOrder[])=>orders.filter(o=>o.siteId===site&&o.status==='approved');
    if(mode==='demo'){
-    // OrderWorkspace keeps isolated demo orders in sessionStorage; show them in the purchase form too.
-    try{
-     const raw=sessionStorage.getItem('ops:orders:demo:'+site);
-     const parsed=raw?JSON.parse(raw) as {orders?:OpsOrder[]}:null;
-     setPurchaseOrderOptions(onlyActiveForSite(Array.isArray(parsed?.orders)?parsed.orders:[]));
-    }catch{setPurchaseOrderOptions([]);}
+    // Read demo orders asynchronously to avoid synchronous state updates in React effects.
+    Promise.resolve().then(()=>{
+     if(!current)return;
+     try{
+      const raw=sessionStorage.getItem('ops:orders:demo:'+site);
+      const parsed=raw?JSON.parse(raw) as {orders?:OpsOrder[]}:null;
+      setPurchaseOrderOptions(onlyActiveForSite(Array.isArray(parsed?.orders)?parsed.orders:[]));
+     }catch{if(current)setPurchaseOrderOptions([]);}
+    });
     return ()=>{current=false;};
    }
    fetch('/api/operations/orders?view=orders&site='+site,{cache:'no-store'}).then(async r=>{
