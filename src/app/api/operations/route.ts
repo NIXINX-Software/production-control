@@ -1,7 +1,7 @@
 import {NextRequest,NextResponse} from 'next/server';
 import {getApps,initializeApp,cert} from 'firebase-admin/app';
 import {getFirestore,FieldValue,type Firestore} from 'firebase-admin/firestore';
-import {requireSameOrigin,text} from '@/lib/pc-server';
+import {db,requireSameOrigin,text} from '@/lib/pc-server';
 import {requireWorkspaceAccess,mayUseOpsAction,type WorkspaceRole} from '@/lib/workspace-access';
 import {csvExport} from '@/lib/pc-operational-files';
 import {
