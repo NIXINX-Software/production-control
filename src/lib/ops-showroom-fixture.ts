@@ -1,3 +1,4 @@
+import 'server-only';
 import type {OpsSnapshot} from './ops-contract';
 /** Showcase-only fixture: illustrative values, never a business catalog. Not loaded into operational forms. */
 export const SHOWROOM_ONLY:OpsSnapshot={
