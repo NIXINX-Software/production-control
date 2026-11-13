@@ -23,6 +23,7 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
  const [orders,setOrders]=useState<OpsOrder[]>([]),[costs,setCosts]=useState<OpsCostReportRow[]>([]);
  const [accounts,setAccounts]=useState<LedgerRow[]>([]);
  const [from,setFrom]=useState(past(30)),[to,setTo]=useState(today());
+ const [demoHydrated,setDemoHydrated]=useState(false);
  const [previewDisabled,setPreviewDisabled]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [name,setName]=useState(''),[pId,setPId]=useState(''),[unit,setUnit]=useState<OpsUnit>('kg'),[quantity,setQuantity]=useState('');
  const [lines,setLines]=useState<OpsOrderLine[]>([]),[budget,setBudget]=useState(''),[minPct,setMinPct]=useState('90'),[maxPct,setMaxPct]=useState('120');
@@ -63,6 +64,26 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
   setOrders(o.orders as OpsOrder[]??[]);
   setAccounts(a.rows as LedgerRow[]??[]);
  }
+ useEffect(()=>{
+  if(!demoOnly)return;
+  let active=true;
+  Promise.resolve().then(()=>{
+   if(!active)return;
+   try{
+    const raw=sessionStorage.getItem('ops:orders:demo:'+site);
+    if(raw){const parsed=JSON.parse(raw) as {orders?:OpsOrder[];demoProducts?:{id:string;name:string;unit:'kg'|'l'|'unit'}[]};
+      if(Array.isArray(parsed.orders))setOrders(parsed.orders);
+      if(Array.isArray(parsed.demoProducts))setDemoProducts(parsed.demoProducts);
+    }
+   }catch{}
+   setDemoHydrated(true);
+  });
+  return ()=>{active=false;};
+ },[demoOnly,site]);
+ useEffect(()=>{
+  if(!demoOnly||!demoHydrated)return;
+  sessionStorage.setItem('ops:orders:demo:'+site,JSON.stringify({orders,demoProducts}));
+ },[demoOnly,demoHydrated,site,orders,demoProducts]);
  useEffect(()=>{
   if(demo)return;
   let valid=true;
