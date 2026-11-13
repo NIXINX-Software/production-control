@@ -62,15 +62,13 @@ function finalizeOpenBag(raw:string|undefined,size:number,unit:string):string {
 
 async function api(action:string,payload?:unknown,signal?:AbortSignal):Promise<Record<string,unknown>> {
  const url=`/api/pc/${action}`;
- const token=await auth?.currentUser?.getIdToken();
- if(!token)throw new Error('LOGIN_REQUIRED');
  const isRead=payload===undefined;
  for(let attempt=0;attempt<(isRead?2:1);attempt++){
   let response:Response;
   try{
    response=await fetch(url,{
     method:isRead?'GET':'POST',
-    headers:{Authorization:`Bearer ${token}`,...(isRead?{}:{'Content-Type':'application/json'})},
+    headers:isRead?undefined:{'Content-Type':'application/json'},
     cache:'no-store',
     credentials:'same-origin',
     signal,
@@ -124,9 +122,6 @@ export default function Home(){
  const [correction,setCorrection]=useState<{type:'count'|'input'|'output';id:string}|null>(null),[correctionLines,setCorrectionLines]=useState<Record<string,number>>({}),[correctionOpen,setCorrectionOpen]=useState<Record<string,string>>({}),[correctPartial,setCorrectPartial]=useState(''),[correctQty,setCorrectQty]=useState(''),[correctUnit,setCorrectUnit]=useState('kg'),[correctEmployee,setCorrectEmployee]=useState(''),[reason,setReason]=useState(''),[correctionCode,setCorrectionCode]=useState('');
  const [adminUser,setAdminUser]=useState<User|null>(null),[isSuperAdmin,setIsSuperAdmin]=useState(false),[adminLoginOpen,setAdminLoginOpen]=useState(false),[adminEmail,setAdminEmail]=useState(''),[adminPassword,setAdminPassword]=useState(''),[adminError,setAdminError]=useState(''),[management,setManagement]=useState<ManagementData|null>(null),[managementLoading,setManagementLoading]=useState(false);
  const [loadError,setLoadError]=useState(false);
- const [kitchenAccess,setKitchenAccess]=useState<'checking'|'allowed'|'denied'>('checking');
- const [kitchenError,setKitchenError]=useState('');
- const [kitchenEmail,setKitchenEmail]=useState(''),[kitchenPassword,setKitchenPassword]=useState('');
  const [countFeedback,setCountFeedback]=useState<{kind:'error'|'success'|'warning';text:string}|null>(null);
  const countSubmitInFlight=useRef(false);
  const managementAutoLoadUid=useRef<string|null>(null);
@@ -136,14 +131,14 @@ export default function Home(){
  const t=translations[lang];
  const refresh=useCallback(async()=>{try{const r=await api(`snapshot?site=${site}&from=${appliedFrom}&to=${appliedTo}`) as unknown as Data;setData({products:r.products||[],staff:r.staff||[],counts:r.counts||[],batches:r.batches||[],activities:r.activities||[],inputs:r.inputs||[],movements:r.movements||[]});setLoadError(false);}catch(e){setLoadError(true);throw e;}},[site,appliedFrom,appliedTo]);
  const loadManagement=useCallback(async(user:User)=>{setManagementLoading(true);try{const token=await user.getIdToken();const adminTo=today(),adminFrom=dateMinus(adminTo,29);const response=await fetch(`/api/pc/management?from=${adminFrom}&to=${adminTo}`,{headers:{Authorization:`Bearer ${token}`},cache:'no-store'});const result=await response.json() as ManagementData&{error?:string};if(!response.ok)throw new Error(result.error||String(response.status));setManagement(result);}finally{setManagementLoading(false);}},[]);
- useEffect(()=>{let preferred:Lang='es';try{if(localStorage.getItem('pc-locale')==='en')preferred='en';}catch{}const timer=window.setTimeout(()=>{setLang(preferred);setReady(true);},0);return()=>window.clearTimeout(timer);},[]);
-  useEffect(()=>{
-  if(!ready||kitchenAccess!=='allowed')return;
+ useEffect(()=>{let cancelled=false;void (async()=>{let preferred:Lang='es';try{if(localStorage.getItem('pc-locale')==='en')preferred='en';}catch{}let next=empty;let issue='';try{const r=await api(`snapshot?site=htl&from=${today()}&to=${today()}`) as unknown as Data;next={products:r.products||[],staff:r.staff||[],counts:r.counts||[],batches:r.batches||[],activities:r.activities||[],inputs:r.inputs||[],movements:r.movements||[]};}catch(e){issue=String(e);}return {preferred,next,issue};})().then(v=>{if(cancelled)return;setLang(v.preferred);setData(v.next);setMessage(v.issue);setLoadError(Boolean(v.issue));setReady(true);});return()=>{cancelled=true;};},[]);
+ useEffect(()=>{
+  if(!ready)return;
   const timer=window.setTimeout(()=>{
-   void refresh().then(()=>setMessage('')).catch(e=>setMessage(String(e)));
+   void refresh().catch(e=>setMessage(String(e)));
   },0);
   return()=>window.clearTimeout(timer);
- },[ready,refresh,kitchenAccess]);
+ },[ready,refresh]);
  useEffect(()=>{if(!auth)return;return onAuthStateChanged(auth,user=>{setAdminUser(user);const allowed=Boolean(user&&isSuperAdminEmail(user.email));setIsSuperAdmin(allowed);if(!allowed){managementAutoLoadUid.current=null;setManagement(null);setTab(current=>current==='management'?'home':current);}});},[]);
  useEffect(()=>{
   if(tab!=='management'||!isSuperAdmin||!adminUser||management||managementLoading)return;
@@ -156,23 +151,6 @@ export default function Home(){
   return ()=>window.clearTimeout(timer);
  },[tab,isSuperAdmin,adminUser,management,managementLoading,loadManagement,lang]);
  useEffect(()=>{const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[]);
- useEffect(()=>{
-  if(!adminUser){const t=window.setTimeout(()=>setKitchenAccess('denied'),0);return()=>window.clearTimeout(t);}
-  let cancelled=false;
-  adminUser.getIdToken().then(async token=>{
-   const response=await fetch('/api/pc/access?site='+site,{headers:{Authorization:'Bearer '+token},cache:'no-store'});
-   const data=await response.json() as {error?:string;role?:string};
-   if(!response.ok)throw new Error(data.error??'Acceso no autorizado');
-   return data.role;
-  }).then(role=>{if(!cancelled){setKitchenAccess('allowed');setIsSuperAdmin(role==='admin'&&isSuperAdminEmail(adminUser.email));setKitchenError('');}})
-    .catch(e=>{if(!cancelled){setKitchenAccess('denied');setIsSuperAdmin(false);setData(empty);setKitchenError(e instanceof Error?e.message:'Acceso no autorizado');}});
-  return()=>{cancelled=true;};
- },[adminUser,site]);
- const kitchenLogin=async()=>{
-  if(!auth){setKitchenError('Firebase Authentication no está configurado.');return;}
-  try{setKitchenError('');await signInWithEmailAndPassword(auth,kitchenEmail.trim(),kitchenPassword);setKitchenPassword('');}
-  catch(e){setKitchenError(e instanceof Error?e.message:'No se pudo iniciar sesión');}
- };
  const adminLogin=async()=>{if(!auth){setAdminError('AUTH_NOT_CONFIGURED');return;}setAdminError('');setBusy(true);try{const credential=await signInWithEmailAndPassword(auth,adminEmail.trim(),adminPassword);if(!isSuperAdminEmail(credential.user.email)){await signOut(auth);throw new Error('SUPERADMIN_REQUIRED');}setAdminLoginOpen(false);setAdminPassword('');setTab('management');await loadManagement(credential.user);}catch(e){setAdminError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}};
  const adminLogout=async()=>{if(auth)await signOut(auth);managementAutoLoadUid.current=null;setManagement(null);setTab('home');};
  const save=async(action:string,payload:unknown,after?:()=>void)=>{setBusy(true);setMessage('');try{await api(action,payload);await refresh();after?.();setMessage(t.saved);return true;}catch(e){setMessage(`${t.error}: ${e instanceof Error?e.message:String(e)}`);return false;}finally{setBusy(false);}};
@@ -353,17 +331,7 @@ export default function Home(){
    </details>)}</div>
   </details>;
  }
- if(!ready||kitchenAccess==='checking')return <main className="ux-loading">Cargando acceso seguro…</main>;
- if(kitchenAccess!=='allowed')return <main className="ux-loading" style={{display:'grid',placeItems:'center',padding:20}}>
-   <section style={{maxWidth:400,width:'100%',padding:24,background:'white',borderRadius:16,display:'grid',gap:12}}>
-   <h1>Producción y Conteos</h1><p>Acceso exclusivo para personal de cocina autorizado. Compras y Control operativo tienen accesos separados.</p>
-   <label>Sucursal<select value={site} onChange={e=>{setKitchenAccess('checking');changeSite(e.target.value as Site);}}>{locations.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
-   {adminUser?<><p>Sesión: {adminUser.email}</p><p role="alert">{kitchenError}</p><button onClick={()=>void signOut(auth!)}>Cambiar de cuenta</button></>:
-    <><label>Correo electrónico<input type="email" value={kitchenEmail} onChange={e=>setKitchenEmail(e.target.value)}/></label>
-    <label>Contraseña<input type="password" value={kitchenPassword} onChange={e=>setKitchenPassword(e.target.value)}/></label>
-    <button disabled={!kitchenEmail||!kitchenPassword} onClick={()=>void kitchenLogin()}>Iniciar sesión</button>
-    {kitchenError&&<p role="alert">{kitchenError}</p>}</>}
-   </section></main>;
+ if(!ready)return <main className="ux-loading">Loading / Cargando…</main>;
  return <div className="ux-app"><header className="ux-header"><button className="ux-logo" onClick={()=>setTab('home')}>BT <span>Production Control</span></button><div className="ux-settings"><select className="ux-branch-label" aria-label={t.branch} value={site} onChange={e=>changeSite(e.target.value as Site)}>{locations.map(l=><option key={l.id} value={l.id}>{l.name.toUpperCase()} · {l.id.toUpperCase()}</option>)}</select>{isSuperAdmin&&<><a className="pc-consulta-link" href="/consulta">Consulta</a><a className="pc-consulta-link" href="/compras">Compras</a><a className="pc-consulta-link" href="/control-operativo">Control operativo</a><a className="pc-consulta-link" href="/operations">Administración general</a></>}<button type="button" className="ux-admin-button" onClick={()=>{if(isSuperAdmin)setTab('management');else{setAdminError('');setAdminLoginOpen(true);}}}>{isSuperAdmin?(lang==='es'?'KPIs':'KPIs'):(lang==='es'?'Management':'Management')}</button><label>{t.lang}<select value={lang} onChange={e=>{const v=e.target.value as Lang;setLang(v);try{localStorage.setItem('pc-locale',v);}catch{}}}><option value="es">Español</option><option value="en">English</option></select></label></div></header><nav className="ux-nav"><button className={tab==='home'?'active':''} onClick={()=>setTab('home')}>{t.home}</button><button className={tab==='counts'?'active':''} onClick={()=>setTab('counts')}>{t.count}</button><button className={tab==='production'?'active':''} onClick={()=>setTab('production')}>{t.myWork}</button><button className={tab==='catalog'?'active':''} onClick={()=>setTab('catalog')}>{t.manage}</button>{isSuperAdmin&&<button className={tab==='management'?'active':''} onClick={()=>setTab('management')}>KPIs</button>}</nav> <main className="ux-main">{message&&<div className="ux-message" role="status"><span>{message}</span><div className="ux-message-actions">{loadError&&<button type="button" className="ux-retry" onClick={()=>void refresh().then(()=>setMessage('')).catch(e=>setMessage(String(e)))}>{lang==='es'?'↻ Reintentar carga':'↻ Retry loading'}</button>}<button type="button" aria-label={lang==='es'?'Cerrar mensaje':'Dismiss message'} onClick={()=>setMessage('')}>×</button></div></div>}
  {tab==='home'&&<section className="ux-welcome"><p className="ux-eyebrow">HOT TACOS · {locations.find(l=>l.id===site)?.name}</p><h1>{t.hello}</h1><p className="ux-muted">{t.subtitle}</p><div className="ux-tiles"><button onClick={()=>{startNewCount();setTab('counts');}}><span className="ux-tile-icon">▤</span><strong>{t.count}</strong><small>{t.countDesc}</small><span className="ux-arrow">→</span></button><button onClick={()=>setTab('production')}><span className="ux-tile-icon">◷</span><strong>{t.cook}</strong><small>{t.cookDesc}</small><span className="ux-arrow">→</span></button></div><button className="ux-manage-link" onClick={()=>setTab('catalog')}>⚙ {t.manage} · {t.manageDesc} →</button></section>}
  {tab==='counts'&&<section className="ux-count"><div className="ux-section-head"><div><p className="ux-eyebrow">{t.count}</p><h1>{countStep==='when'?t.when:countStep==='who'?t.who:countStep==='bags'?t.countProducts:(lang==='es'?'Revisar y guardar':'Review and save')}</h1></div><button className="ux-secondary" onClick={startNewCount}>{t.cancel}</button></div>
