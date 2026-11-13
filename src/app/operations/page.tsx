@@ -7,7 +7,9 @@ import {baseAmount,bankStatusForPayments,EMPTY_OPS,normalUnit,purchaseBalances,p
  type OpsSite,type OpsUnit,type OpsSnapshot,type OpsPurchase,type OpsPayment,type OpsPresentation} from '@/lib/ops-contract';
 import './operations.css';
 
-type Panel='compras'|'recepcion'|'catalogos'|'kpis'|'showroom'|'datos';
+type Panel='compras'|'recepcion'|'conciliacion'|'catalogos'|'kpis'|'showroom'|'datos';
+type Tender={id:string;method:OpsPayment['method'];amount:string;reference:string};
+const tenderMethods:{value:OpsPayment['method'];label:string}[]=[{value:'cash',label:'Efectivo'},{value:'debit_card',label:'Tarjeta de débito'},{value:'credit_card',label:'Tarjeta de crédito'},{value:'transfer',label:'Transferencia'},{value:'credit_note',label:'Nota de crédito del proveedor'},{value:'other',label:'Otro'}];
 type ViewMode='demo'|'live';
 const SITES:{id:OpsSite;name:string}[]=[{id:'htl',name:'Hot Tacos Leamington'},{id:'htw',name:'Hot Tacos Windsor'},{id:'htft',name:'Hot Tacos Food Truck'}];
 const dateToday=()=>new Date().toLocaleDateString('en-CA',{timeZone:'America/Toronto'});
@@ -32,15 +34,15 @@ const initial:OpsSnapshot={
  purchases:[
   {id:'htl_demo_credit',siteId:'htl',purchaseDate:'2026-11-13',supplierId:'htl_charro',supplierName:'El Charro',totalCents:50000,currency:'CAD',
    paidCents:0,balanceCents:50000,dueDate:'2026-12-13',goodsStatus:'pending',documentStatus:'captured',bankStatus:'awaiting_payment',
-   receiptCount:0,documentCount:1,notes:'Ejemplo: línea de crédito a 30 días'},
+   receiptCount:0,documentCount:1,receiptDelivered:false,receiptAcknowledged:false,notes:'Ejemplo: línea de crédito a 30 días'},
   {id:'htw_demo_cash',siteId:'htw',purchaseDate:'2026-11-13',supplierId:'htw_costco',supplierName:'Costco Windsor',totalCents:12950,currency:'CAD',
    paidCents:12950,balanceCents:0,dueDate:null,goodsStatus:'received',documentStatus:'received',bankStatus:'not_applicable',
-   receiptCount:1,documentCount:1,notes:'Ejemplo: compra de contado'}
+   receiptCount:1,documentCount:1,receiptDelivered:true,receiptAcknowledged:true,notes:'Ejemplo: compra de contado'}
  ],
  payments:[{id:'htw_demo_pay',siteId:'htw',purchaseId:'htw_demo_cash',amountCents:12950,method:'cash',reconciliationStatus:'not_applicable',paidDate:'2026-11-13'}],
  receipts:[],documents:[{id:'htl_demo_document',siteId:'htl',purchaseId:'htl_demo_credit',storagePath:'demo-only',mime:'image/jpeg',size:100,createdAt:null}]
 };
-const tabs:{id:Panel;title:string}[]=[{id:'compras',title:'Compras'},{id:'recepcion',title:'Recepción'},{id:'catalogos',title:'Catálogos'},
+const tabs:{id:Panel;title:string}[]=[{id:'compras',title:'Compras'},{id:'recepcion',title:'Recepción'},{id:'conciliacion',title:'Conciliación'},{id:'catalogos',title:'Catálogos'},
  {id:'kpis',title:'KPIs'},{id:'showroom',title:'Showroom'},{id:'datos',title:'Datos / DWH'}];
 const filterSite=(data:OpsSnapshot,siteId:OpsSite):OpsSnapshot=>({
  products:data.products.filter(x=>x.siteId===siteId),suppliers:data.suppliers.filter(x=>x.siteId===siteId),
@@ -53,6 +55,18 @@ const statusText={
  awaiting_payment:'Sin pago bancario',pending_reconciliation:'Por conciliar',not_applicable:'Sin cargo bancario'
 } as Record<string,string>;
 const status=(v:string)=>statusText[v]||v;
+async function resizeEvidence(input:File):Promise<File>{
+ if(!input.type.startsWith('image/'))throw new Error('Selecciona una fotografía del comprobante.');
+ let bitmap:ImageBitmap;
+ try{bitmap=await createImageBitmap(input);}catch{throw new Error('No se pudo procesar la imagen. Prueba con JPG, PNG o WebP.');}
+ const max=1600,ratio=Math.min(1,max/Math.max(bitmap.width,bitmap.height));
+ const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(bitmap.width*ratio));canvas.height=Math.max(1,Math.round(bitmap.height*ratio));
+ const ctx=canvas.getContext('2d');if(!ctx){bitmap.close();throw new Error('No se pudo preparar la imagen.');}
+ ctx.fillStyle='#ffffff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();
+ const blob=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('No se pudo comprimir la imagen.')),'image/jpeg',0.74));
+ if(blob.size>8*1024*1024)throw new Error('La imagen supera el límite de 8 MB.');
+ return new File([blob],`comprobante-${Date.now()}.jpg`,{type:'image/jpeg'});
+}
 function csvDownload(filename:string,header:string[],rows:(string|number)[][]){
  const safe=(v:string|number)=>'"'+String(v).replace(/"/g,'""')+'"';
  const content='\ufeff'+[header,...rows].map(r=>r.map(safe).join(',')).join('\r\n');
@@ -65,13 +79,14 @@ export default function Operations(){
  const [user,setUser]=useState<User|null>(null),[email,setEmail]=useState(''),[password,setPassword]=useState('');
  const [busy,setBusy]=useState(false),[msg,setMsg]=useState(''),[selection,setSelection]=useState('htl_demo_credit');
  const [supplierId,setSupplierId]=useState('htl_charro'),[total,setTotal]=useState('500'),[purchaseDate,setPurchaseDate]=useState(dateToday());
- const [terms,setTerms]=useState('30'),[initialPay,setInitialPay]=useState('0'),[initialMethod,setInitialMethod]=useState<OpsPayment['method']>('card'),[notes,setNotes]=useState('');
+ const [terms,setTerms]=useState('30'),[tenders,setTenders]=useState<Tender[]>([]),[notes,setNotes]=useState('');
+ const [receiptDeliveredAtPurchase,setReceiptDeliveredAtPurchase]=useState(false),[inlineNewProduct,setInlineNewProduct]=useState(false),[inlineNewPresentation,setInlineNewPresentation]=useState(false);
  const [payAmount,setPayAmount]=useState(''),[payMethod,setPayMethod]=useState<OpsPayment['method']>('transfer');
  const [recipient,setRecipient]=useState(''),[verifier,setVerifier]=useState(''),[evidence,setEvidence]=useState<File|null>(null);
  const [newSupplier,setNewSupplier]=useState(''),[newProduct,setNewProduct]=useState(''),[productUnit,setProductUnit]=useState<'kg'|'l'|'unit'>('kg');
  const [presentationProduct,setPresentationProduct]=useState('htl_feta'),[newPresentationLabel,setNewPresentationLabel]=useState('');
  const [packCount,setPackCount]=useState('750'),[packUnit,setPackUnit]=useState<OpsUnit>('g');
- const [receivingPresentation,setReceivingPresentation]=useState('htl_feta_750'),[receivedPacks,setReceivedPacks]=useState('3');
+ const [receivingProduct,setReceivingProduct]=useState('htl_feta'),[receivingPresentation,setReceivingPresentation]=useState('htl_feta_750'),[receivedPacks,setReceivedPacks]=useState('3'),[lineCost,setLineCost]=useState('');
  const [receptionState,setReceptionState]=useState<'partial'|'received'>('received');
  useEffect(()=>{if(!auth)return;return onAuthStateChanged(auth,setUser);},[]);
  const active=useMemo(()=>filterSite(data,site),[data,site]);
@@ -81,7 +96,12 @@ export default function Operations(){
  const supplier=active.suppliers.find(x=>x.id===supplierId);
  const presentationProductObj=active.products.find(x=>x.id===presentationProduct);
  const eligibleUnits=(['kg','g','lb','l','ml','unit','portion'] as OpsUnit[]).filter(u=>presentationProductObj&&normalUnit(u)===presentationProductObj.unit);
- const currentPresentation=active.presentations.find(x=>x.id===receivingPresentation);
+ const currentPresentation=active.presentations.find(x=>x.id===receivingPresentation&&x.productId===receivingProduct);
+ const receivingProductObj=active.products.find(x=>x.id===receivingProduct);
+ const receivingPresentations=active.presentations.filter(x=>x.productId===receivingProduct);
+ const tenderTotalCents=tenders.reduce((sum,p)=>sum+Math.round(Number(p.amount||0)*100),0);
+ const draftCents=Math.round(Number(total||0)*100);
+ const draftBalance=draftCents-tenderTotalCents;
  const associated=selected?data.payments.filter(p=>p.purchaseId===selected.id):[];
  const setChange=(purchaseId:string,patch:Partial<OpsPurchase>)=>setData(d=>({...d,purchases:d.purchases.map(p=>p.id===purchaseId?{...p,...patch}:p)}));
  async function request(action:string,payload:Record<string,unknown>,siteId:OpsSite=site){
@@ -109,7 +129,7 @@ export default function Operations(){
  }
  async function work(job:()=>Promise<void>){setBusy(true);setMsg('');try{await job();setMsg('Operación completada.');}
   catch(e){setMsg('No se completó: '+(e instanceof Error?e.message:String(e)));}finally{setBusy(false);}}
- function chooseSite(v:OpsSite){setSite(v);setScope([v]);setSelection('');setSupplierId('');setPresentationProduct('');setReceivingPresentation('');}
+ function chooseSite(v:OpsSite){setSite(v);setScope([v]);setSelection('');setSupplierId('');setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');}
  async function addSupplier(){
   if(newSupplier.trim().length<2)throw new Error('Escribe el nombre del proveedor.');
   if(mode==='live'){await request('supplier.add',{name:newSupplier});await refreshLive();}
@@ -118,18 +138,18 @@ export default function Operations(){
  }
  async function addProduct(){
   if(newProduct.trim().length<2)throw new Error('Escribe el nombre del producto.');
-  if(mode==='live'){await request('product.add',{name:newProduct,unit:productUnit});await refreshLive();}
-  else{const id=genId(site);setData(d=>({...d,products:[...d.products,{id,siteId:site,name:newProduct.trim(),unit:productUnit,active:true}]}));setPresentationProduct(id);}
-  setNewProduct('');
+  if(mode==='live'){const r=await request('product.add',{name:newProduct,unit:productUnit});await refreshLive();if(r.id){setPresentationProduct(r.id);setReceivingProduct(r.id);setReceivingPresentation('');}}
+  else{const id=genId(site);setData(d=>({...d,products:[...d.products,{id,siteId:site,name:newProduct.trim(),unit:productUnit,active:true}]}));setPresentationProduct(id);setReceivingProduct(id);setReceivingPresentation('');}
+  setNewProduct('');setInlineNewProduct(false);
  }
  async function addPresentation(){
   if(!presentationProductObj)throw new Error('Selecciona el producto maestro.');
   const n=Number(packCount);
   if(!newPresentationLabel.trim()||!Number.isFinite(n)||n<=0||normalUnit(packUnit)!==presentationProductObj.unit)throw new Error('Presentación o unidad inválida.');
-  if(mode==='live'){await request('presentation.add',{productId:presentationProductObj.id,label:newPresentationLabel,packCount:n,packUnit});await refreshLive();}
+  if(mode==='live'){const r=await request('presentation.add',{productId:presentationProductObj.id,label:newPresentationLabel,packCount:n,packUnit});await refreshLive();if(r.id)setReceivingPresentation(r.id);}
   else{const id=genId(site),p:OpsPresentation={id,siteId:site,productId:presentationProductObj.id,label:newPresentationLabel.trim(),packCount:n,packUnit,unitAmount:baseAmount(n,packUnit),unit:presentationProductObj.unit,active:true};
     setData(d=>({...d,presentations:[...d.presentations,p]}));setReceivingPresentation(id);}
-  setNewPresentationLabel('');
+  setNewPresentationLabel('');setInlineNewPresentation(false);
  }
  async function addPurchase(){
   const cents=Math.round(Number(total)*100),payCents=Math.round(Number(initialPay||0)*100);
