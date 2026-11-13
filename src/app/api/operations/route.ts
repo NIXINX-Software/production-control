@@ -107,6 +107,30 @@ export async function POST(req:NextRequest){
     await store.collection('ops_products').doc(id).create({siteId:site,name,unit,active:true,createdAt:now,updatedAt:now});
     return NextResponse.json({ok:true,id});
   }
+  if(action==='product.update'||action==='product.deactivate'||action==='product.delete'){
+    const id=text(body.productId,130);
+    const ref=store.collection('ops_products').doc(id);
+    const current=await ref.get();
+    const product=current.data();
+    if(!product||product.siteId!==site)throw new Error('PRODUCT_NOT_FOUND');
+    const linkedPresentations=await store.collection('ops_presentations').where('productId','==',id).limit(1).get();
+    const linkedReceipts=await store.collection('ops_receipts').where('productId','==',id).limit(1).get();
+    const used=!linkedPresentations.empty||!linkedReceipts.empty;
+    if(action==='product.delete'){
+      if(used)throw new Error('PRODUCT_IN_USE_DEACTIVATE_INSTEAD');
+      await ref.delete();
+      return NextResponse.json({ok:true});
+    }
+    if(action==='product.deactivate'){
+      await ref.update({active:false,updatedAt:now});
+      return NextResponse.json({ok:true});
+    }
+    const name=text(body.name,120),unit=body.unit;
+    if(invalid(name)||!['kg','l','unit'].includes(String(unit)))throw new Error('INVALID_PRODUCT');
+    if(used&&unit!==product.unit)throw new Error('PRODUCT_UNIT_LOCKED_BY_HISTORY');
+    await ref.update({name,unit,active:true,updatedAt:now});
+    return NextResponse.json({ok:true});
+  }
   if(action==='presentation.add'){
     const productId=text(body.productId,130),label=text(body.label,100),unit=body.packUnit,packCount=Number(body.packCount);
     if(invalid(label)||!OPS_UNITS.some(u=>u===unit)||!Number.isFinite(packCount)||packCount<=0||packCount>100000)throw new Error('INVALID_PRESENTATION');
