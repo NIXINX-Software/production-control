@@ -86,3 +86,62 @@
  .ops .ops-inline-check{min-height:42px}
  .ops-card{gap:14px}
 }
+
+
+/* Compact purchasing and filtered financial follow-up */
+.ops-capture-layout{max-width:660px;display:grid;gap:15px;align-items:start}
+.ops-payments-compact{display:grid;gap:7px}
+.ops-payment-line{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(105px,1fr) 40px;align-items:end;gap:7px}
+.ops-payment-line label{font-size:11px}
+.ops-payment-line input,.ops-payment-line select{height:43px}
+.ops button.ops-delete-tender{border:1px solid #ead2d7;color:#ab3541;padding:0;min-height:43px;height:43px;font-size:21px;font-weight:500}
+.ops-payment-summary-compact{padding:10px 12px;gap:5px}
+.ops-payment-summary-compact>div{padding:3px 0;font-size:13px}
+.ops-payment-summary-compact>div:last-child{border:0;padding:3px 0}
+.ops-payment-summary-compact>div.ops-remaining{border-top:1px solid #d0e0e9;padding-top:9px;margin-top:4px}
+.ops-saved-notice{font-size:14px;padding:12px;border:1px solid #b9ddc3;border-radius:10px;background:#f1faf3;color:#246442;font-weight:650}
+.ops-purchase-search{border:1px solid #d8e5ed;border-radius:13px;background:white;overflow:hidden}
+.ops .ops-search-toggle{display:flex;justify-content:space-between;align-items:center;width:100%;text-align:left;border:0;border-radius:0;padding:14px 16px;color:#1d567c;font-size:14px}
+.ops-search-body{border-top:1px solid #e3ebf1;padding:13px;display:grid;gap:12px}
+.ops-reconcile{width:100%;gap:16px}
+.ops-date-query{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:10px;align-items:end}
+.ops-date-query .ops-primary{width:auto;padding:10px 25px;height:43px;min-height:43px}
+.ops-history-result{display:grid;gap:12px}
+.ops-history-scroll{max-width:100%;overflow:auto;overscroll-behavior:contain}
+.ops-history-table{width:100%;border-collapse:collapse;min-width:880px;table-layout:auto;font-size:12px}
+.ops-history-table th{font-size:11px;text-align:left;background:#eff6fa;color:#315a76;font-weight:750;padding:10px 8px;white-space:normal}
+.ops-history-table td{border-bottom:1px solid #e3ebef;padding:11px 8px;vertical-align:middle;min-width:85px}
+.ops-history-table td:first-child{min-width:160px}
+.ops-history-table td:nth-child(2){min-width:115px}
+.ops-history-table td strong{display:block;font-size:12px}
+.ops-history-table td small{display:block;font-size:11px;color:#667f91;line-height:1.4}
+.ops-history-table input[type="checkbox"]{width:17px;height:17px;min-height:17px;accent-color:#136d91;opacity:1;cursor:default}
+.ops-history-table label.ops-bank-cell{display:flex;flex-direction:row;align-items:center;gap:7px;color:#536d7e;font-size:11px;font-weight:450}
+.ops-not-applicable{font-size:11px;color:#6b8090}
+.ops button.ops-row-action{font-size:12px;padding:7px 11px;min-height:33px}
+.ops-awaiting-query{padding:25px 15px;text-align:center;background:#f5f9fc;border-radius:12px;border:1px dashed #cfdee9}
+.ops-awaiting-query strong{display:block;color:#42627b}
+.ops-awaiting-query p{color:#6a8192;margin-top:5px;font-size:12px}
+.ops-transaction-details{border-top:1px solid #dce8ee;padding-top:18px;display:grid;gap:12px}
+.ops input[type=number]::-webkit-inner-spin-button,.ops input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.ops input[type=number]{-moz-appearance:textfield;appearance:textfield}
+@media(max-width:720px){
+ .ops-date-query{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .ops-date-query button{grid-column:1/-1}
+ .ops-history-scroll{overflow:visible}
+ .ops-history-table{min-width:0;display:block}
+ .ops-history-table thead{display:none}
+ .ops-history-table tbody{display:grid;gap:11px}
+ .ops-history-table tr{display:grid;grid-template-columns:1fr 1fr;gap:7px 11px;border:1px solid #d9e5ec;border-radius:12px;padding:13px;background:#fff}
+ .ops-history-table td,.ops-history-table td:first-child,.ops-history-table td:nth-child(2){min-width:0;border:0;padding:1px}
+ .ops-history-table td::before{content:attr(data-label);display:block;font-size:10px;font-weight:750;color:#72889b;margin-bottom:4px}
+ .ops-history-table td:first-child{grid-column:1}
+ .ops-history-table td:last-child{grid-column:1/-1}
+ .ops-history-table td:last-child button{width:100%}
+ .ops-history-table td strong{font-size:14px}
+}
+@media(max-width:390px){
+ .ops-payment-line{grid-template-columns:minmax(0,1fr) minmax(92px,1fr) 33px;gap:5px}
+ .ops-payment-line label{font-size:10px}
+ .ops button.ops-delete-tender{font-size:18px;height:42px;min-height:42px}
+}
