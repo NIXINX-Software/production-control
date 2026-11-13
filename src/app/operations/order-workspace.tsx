@@ -3,7 +3,7 @@ import {useEffect,useMemo,useState} from 'react';
 import type {User} from 'firebase/auth';
 import {baseAmount,normalUnit,type OpsSnapshot,type OpsSite,type OpsUnit} from '@/lib/ops-contract';
 import {OPS_APPROVAL_AREAS,orderEstimate,effectiveBudgetRange,supplyStatusFor,
- type OpsCostReportRow,type OpsOrder,type OpsOrderLine,type OpsOrderApproval,type OpsApprovalArea} from '@/lib/ops-order-contract';
+ type OpsCostReportRow,type OpsOrder,type OpsOrderLine,type OpsApprovalArea} from '@/lib/ops-order-contract';
 import {PC_UNITS} from '@/lib/pc-units';
 
 type Panel='ordenes'|'planeacion'|'costos'|'proveedores';
@@ -13,7 +13,6 @@ const money=(c:number|null|undefined)=>c===null||c===undefined?'Sin costo histó
 const today=()=>new Date().toLocaleDateString('en-CA',{timeZone:'America/Toronto'});
 const past=(days:number)=>{const d=new Date();d.setDate(d.getDate()-days);return d.toLocaleDateString('en-CA',{timeZone:'America/Toronto'});};
 const labels:{[key:string]:string}={draft:'Borrador',pending_owner:'Pendiente propietaria',returned:'Devuelta para corrección',approved:'Abierta / autorizada',closed:'Cerrada',pending:'Pendiente',partial:'Parcial',complete:'Completo'};
-const periodText=(from:string,to:string)=>from+' al '+to;
 function demoOrder(site:OpsSite,lines:OpsOrderLine[],from:string,to:string,budget:number,min:number,max:number,actor:string):OpsOrder{
  return {id:site+'_'+crypto.randomUUID(),siteId:site,folio:site.toUpperCase()+'-OC-'+today().replaceAll('-','')+'-DEMO',
   status:'draft',revision:1,from,to,lines,estimatedSubtotalCents:orderEstimate(lines),
@@ -24,13 +23,14 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
  const [orders,setOrders]=useState<OpsOrder[]>([]),[costs,setCosts]=useState<OpsCostReportRow[]>([]);
  const [accounts,setAccounts]=useState<LedgerRow[]>([]);
  const [from,setFrom]=useState(past(30)),[to,setTo]=useState(today());
- const [demoOnly,setDemoOnly]=useState(demo),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
+ const [previewDisabled,setPreviewDisabled]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [name,setName]=useState(''),[pId,setPId]=useState(''),[unit,setUnit]=useState<OpsUnit>('kg'),[quantity,setQuantity]=useState('');
  const [lines,setLines]=useState<OpsOrderLine[]>([]),[budget,setBudget]=useState(''),[minPct,setMinPct]=useState('90'),[maxPct,setMaxPct]=useState('120');
  const [revisionId,setRevisionId]=useState('');
  const [comment,setComment]=useState(''),[paidSupplier,setPaidSupplier]=useState(''),[paidAmount,setPaidAmount]=useState(''),[paidRef,setPaidRef]=useState(''),[paidMethod,setPaidMethod]=useState('transfer');
  const [supplies,setSupplies]=useState<Record<string,string>>({});
  const [demoProducts,setDemoProducts]=useState<{id:string;name:string;unit:'kg'|'l'|'unit'}[]>([]),[newDemoProduct,setNewDemoProduct]=useState('');
+ const demoOnly=demo||previewDisabled;
  const allProducts=useMemo(()=>[
    ...data.products.filter(x=>x.siteId===site&&x.active).map(x=>({id:x.id,name:x.name,unit:x.unit})),
    ...(demoOnly?demoProducts:[])
@@ -63,19 +63,14 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
   setOrders(o.orders as OpsOrder[]??[]);
   setAccounts(a.rows as LedgerRow[]??[]);
  }
- async function fetchCosts(){
-  if(demoOnly){setCosts([]);return;}
-  const r=await get('/api/operations/orders?view=costs&site='+site+'&from='+from+'&to='+to);
-  setCosts((r.rows as OpsCostReportRow[])??[]);
- }
  useEffect(()=>{
-  if(demo){setDemoOnly(true);setError('');return;}
+  if(demo)return;
   let valid=true;
   (async()=>{try{
    const r=await get('/api/operations/orders?view=orders&site='+site);
-   if(!valid)return;setOrders(r.orders as OpsOrder[]??[]);setDemoOnly(false);setError('');
+   if(!valid)return;setOrders(r.orders as OpsOrder[]??[]);setPreviewDisabled(false);setError('');
   }catch(e){if(!valid)return;const message=e instanceof Error?e.message:String(e);
-   if(message==='OPS_PREVIEW_DISABLED'){setDemoOnly(true);setError('');}
+   if(message==='OPS_PREVIEW_DISABLED'){setPreviewDisabled(true);setError('');}
    else setError(message);
   }})();
   return ()=>{valid=false;};
