@@ -4,7 +4,7 @@ import Link from 'next/link';
 import {onAuthStateChanged,signInWithEmailAndPassword,signOut,type User} from 'firebase/auth';
 import {auth} from '@/lib/firebase';
 import {baseAmount,bankStatusForPayments,EMPTY_OPS,normalUnit,purchaseBalances,purchaseSummary,
- type OpsSite,type OpsUnit,type OpsSnapshot,type OpsProduct,type OpsPurchase,type OpsPayment,type OpsPresentation} from '@/lib/ops-contract';
+ type OpsSite,type OpsUnit,type OpsSnapshot,type OpsPurchase,type OpsPayment,type OpsPresentation} from '@/lib/ops-contract';
 import './operations.css';
 
 type Panel='compras'|'recepcion'|'catalogos'|'kpis'|'showroom'|'datos';
@@ -102,13 +102,13 @@ export default function Operations(){
    if(!resp.ok||!result.data)throw new Error(id.toUpperCase()+': '+(result.error||String(resp.status)));
    return result.data;
   }));
-  const merge=<K extends keyof OpsSnapshot>(key:K):OpsSnapshot[K]=>requests.flatMap(d=>d[key]) as OpsSnapshot[K];
+  const merge=<K extends keyof OpsSnapshot>(key:K):OpsSnapshot[K]=>requests.reduce<OpsSnapshot[K]>((rows,item)=>[...rows,...item[key]] as OpsSnapshot[K],[] as unknown as OpsSnapshot[K]);
   setData({products:merge('products'),suppliers:merge('suppliers'),presentations:merge('presentations'),
    purchases:merge('purchases'),payments:merge('payments'),receipts:merge('receipts'),documents:merge('documents')});
  }
  async function work(job:()=>Promise<void>){setBusy(true);setMsg('');try{await job();setMsg('Operación completada.');}
   catch(e){setMsg('No se completó: '+(e instanceof Error?e.message:String(e)));}finally{setBusy(false);}}
- function chooseSite(v:OpsSite){setSite(v);setSelection('');setSupplierId('');setPresentationProduct('');setReceivingPresentation('');}
+ function chooseSite(v:OpsSite){setSite(v);setScope([v]);setSelection('');setSupplierId('');setPresentationProduct('');setReceivingPresentation('');}
  async function addSupplier(){
   if(newSupplier.trim().length<2)throw new Error('Escribe el nombre del proveedor.');
   if(mode==='live'){await request('supplier.add',{name:newSupplier});await refreshLive();}
@@ -202,7 +202,6 @@ export default function Operations(){
  }
  async function login(){if(!auth)throw new Error('Firebase Auth no está configurado.');await signInWithEmailAndPassword(auth,email,password);setPassword('');}
  const demoMode=mode==='demo';
- const pool=tab==='showroom'?initial:data;
  const selectedRows=tab==='showroom'?initial.purchases:purchases;
  const showStats=purchaseSummary(selectedRows);
  const currentTitle=demoMode?'DEMOSTRACIÓN — NO GUARDA EN FIRESTORE':'OPERACIÓN CON AUTENTICACIÓN';
