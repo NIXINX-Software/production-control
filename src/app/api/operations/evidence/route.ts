@@ -48,7 +48,9 @@ export async function POST(req:NextRequest){
   if(!isImage(buffer,mime))throw new Error('INVALID_FILE_TYPE');
   const documentId=site+'_'+randomUUID();
   const ext=mime==='image/jpeg'?'jpg':mime==='image/png'?'png':'webp';
-  const storagePath=['nixinx-operations',site,purchaseId,documentId+'.'+ext].join('/');
+  // Keep company and ticket type as the only folder levels; use the purchase folio for traceability.
+  const purchaseFolio=typeof purchase.folio==='string'&&/^[A-Z0-9-]{1,80}$/.test(purchase.folio)?purchase.folio:purchaseId;
+  const storagePath=[site,'tickets-de-compra',purchaseFolio+'_'+documentId+'.'+ext].join('/');
   const object=bucket.file(storagePath);
   await object.save(buffer,{resumable:false,metadata:{contentType:mime,cacheControl:'private,no-store',metadata:{sha256:createHash('sha256').update(buffer).digest('hex')}}});
   try{
