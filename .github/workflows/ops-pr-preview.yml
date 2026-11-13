@@ -31,11 +31,11 @@ jobs:
       - name: Publish PREVIEW (no --prod)
         shell: bash
         run: |
-          URL="$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")"
+          URL="$(vercel deploy --prebuilt --archive=tgz --token="$VERCEL_TOKEN")"
           echo "VERCEL_PREVIEW_URL=$URL" >> "$GITHUB_ENV"
           echo "### NIXINX Operations Preview" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Preview: $URL/compras (Compras), $URL/control-operativo (Control), $URL/operations (Superadmin)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "No production deploy. Operations writes require independent sandbox credentials." >> "$GITHUB_STEP_SUMMARY"
+          echo "No production deploy. Operations preview is isolated in-memory; production Firebase is never accessed." >> "$GITHUB_STEP_SUMMARY"
           echo "PREVIEW_URL=$URL/operations"
