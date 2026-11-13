@@ -59,6 +59,26 @@ export default function Operations(){
  const [receivingProduct,setReceivingProduct]=useState('htl_feta'),[receivingPresentation,setReceivingPresentation]=useState('htl_feta_750'),[receivedPacks,setReceivedPacks]=useState('3'),[lineCost,setLineCost]=useState('');
  const [receptionState,setReceptionState]=useState<'partial'|'received'>('received');
  useEffect(()=>{if(!auth)return;return onAuthStateChanged(auth,setUser);},[]);
+ useEffect(()=>{
+   if(mode!=='live'||!user)return;
+   let cancelled=false;
+   setSuperadminVerified(false);
+   user.getIdToken().then(async token=>{
+     const response=await fetch('/api/operations?site='+site,{headers:{Authorization:'Bearer '+token},cache:'no-store'});
+     const result=await response.json() as {data?:OpsSnapshot;error?:string};
+     if(!response.ok||!result.data)throw new Error(result.error||'Sin autorización de consulta.');
+     return result.data;
+   }).then(result=>{
+     if(cancelled)return;
+     setData(result);setSuperadminVerified(true);
+     setMsg('');
+   }).catch(err=>{
+     if(cancelled)return;
+     setSuperadminVerified(false);setData(EMPTY_OPS);
+     setMsg('No se pudieron cargar los catálogos de Firestore: '+(err instanceof Error?err.message:'error desconocido'));
+   });
+   return ()=>{cancelled=true;};
+ },[mode,user,site]);
  const active=useMemo(()=>filterSite(data,site),[data,site]);
  const purchases=useMemo(()=>data.purchases.filter(p=>scope.includes(p.siteId)),[data,scope]);
  const stats=useMemo(()=>purchaseSummary(purchases),[purchases]);
@@ -259,7 +279,7 @@ export default function Operations(){
     <label>Empresa operativa<select value={site} onChange={e=>chooseSite(e.target.value as OpsSite)}>
        {SITES.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
     </select></label>
-    <div className="ops-toolbar-note">El producto maestro, los proveedores y cada compra pertenecen a una sola empresa.</div>
+    <div className="ops-toolbar-note">Los catálogos operativos se consultan desde Firestore por empresa. En Demo se crean en memoria y no quedan guardados.</div>
    </div>
    {!demoMode&&<div className="ops-auth">
      {user?<div className="ops-flex"><span>Sesión: {user.email}</span><button onClick={()=>void work(()=>refreshLive())} disabled={busy}>Consultar empresas seleccionadas</button><button onClick={()=>{setSuperadminVerified(false);setData(EMPTY_OPS);setTab('compras');void signOut(auth!);}}>Salir</button></div>:
