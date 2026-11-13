@@ -426,39 +426,48 @@ export default function Operations(){
      </>:<p>Selecciona una compra para capturar su mercancía.</p>}
     </section>
    </div>}
-   {tab==='conciliacion'&&<div className="ops-layout">
-    <section className="ops-card">
-     <h2>Pagos y crédito de proveedores</h2>
-     <p className="ops-hint">Una compra a crédito genera una deuda. Su conciliación bancaria se realiza cuando existe un pago real; el crédito en sí no aparecerá en el statement.</p>
-     <label>Compra<select value={selected?.id??''} onChange={e=>setSelection(e.target.value)}><option value="">Seleccionar compra</option>
-       {active.purchases.map(p=><option key={p.id} value={p.id}>{p.supplierName} · {cash(p.totalCents)} · saldo {cash(p.balanceCents)}</option>)}</select></label>
-     {selected&&<><div className="ops-payment-summary"><div><span>Total comprado</span><strong>{cash(selected.totalCents)}</strong></div>
-       <div><span>Pagos aplicados</span><strong>{cash(selected.paidCents)}</strong></div><div><span>Saldo por pagar</span><strong>{cash(selected.balanceCents)}</strong></div></div>
-      <h3>Registrar pago o abono posterior</h3>
-      <div className="ops-grid-2"><label>Importe (CAD)<input type="number" inputMode="decimal" min="0.01" step="0.01" value={payAmount} onChange={e=>setPayAmount(e.target.value)}/></label>
-       <label>Medio<select value={payMethod} onChange={e=>setPayMethod(e.target.value as OpsPayment['method'])}>{tenderMethods.map(m=><option key={m.value} value={m.value}>{m.label}</option>)}</select></label></div>
-      <button disabled={busy||selected.balanceCents===0} onClick={()=>void work(addPayment)}>Aplicar abono a la deuda</button>
-      <div className="ops-mini-list">{associated.map(p=><div key={p.id}>{cash(p.amountCents)} · {tenderMethods.find(m=>m.value===p.method)?.label??p.method}<small>{p.reconciliationStatus==='pending'?'Pendiente de conciliar':'Sin cargo bancario directo'}</small></div>)}</div>
-     </>}
-    </section>
-    <section className="ops-card">
-     <h2>Conciliación y análisis de costos</h2>
-     <p className="ops-hint">Etapa financiera independiente. Los pagos con tarjeta o transferencia deben coincidir con su movimiento bancario; los cargos sin compra asociada quedarán como excepciones.</p>
-     <h3>Pagos que requieren match bancario</h3>
-     <div className="ops-mini-list">{active.payments.filter(p=>p.reconciliationStatus==='pending').map(p=><div key={p.id}><span>{active.purchases.find(x=>x.id===p.purchaseId)?.supplierName??'Proveedor'}</span>
-      <span>{cash(p.amountCents)}<small>{tenderMethods.find(m=>m.value===p.method)?.label??p.method} · Por conciliar</small></span></div>)}</div>
-     {!active.payments.some(p=>p.reconciliationStatus==='pending')&&<p className="ops-hint">Sin pagos bancarios pendientes en los datos cargados.</p>}
-     <div className="ops-divider"/>
-     <h3>Costos capturados por producto maestro</h3>
-     <div className="ops-mini-list">{active.products.map(prod=>{
-       const rows=active.receipts.filter(r=>r.productId===prod.id&&typeof r.lineTotalCents==='number'&&r.receivedBaseAmount>0);
-       const units=rows.reduce((n,r)=>n+r.receivedBaseAmount,0),cost=rows.reduce((n,r)=>n+(r.lineTotalCents??0),0);
-       return <div key={prod.id}><span>{prod.name}<small>{rows.length} línea(s) con costo</small></span>
-        <span>{rows.length&&units>0?cash(Math.round(cost/units))+' / '+prod.unit:'Pendiente de capturar costos'}</span></div>;
-     })}</div>
-     <p className="ops-hint">La carga de estados de cuenta, asignación de movimientos y detección de cargos sin compra respaldada se implementará en el incremento de Conciliación. No se marcan pagos como conciliados sin evidencia.</p>
-    </section>
-   </div>}
+   {tab==='conciliacion'&&<section className="ops-card ops-reconcile">
+     <h2>Seguimiento y conciliación de compras</h2>
+     <p className="ops-hint">Consulta las compras del periodo seleccionado y verifica sus etapas. Las marcas reflejan registros reales de cada proceso; no sustituyen la validación bancaria.</p>
+     <div className="ops-date-query">
+      <label>Desde<input type="date" value={queryFrom} onChange={e=>{setQueryFrom(e.target.value);setHistoryLoaded(false);}}/></label>
+      <label>Hasta<input type="date" value={queryTo} onChange={e=>{setQueryTo(e.target.value);setHistoryLoaded(false);}}/></label>
+      <button type="button" className="ops-primary" disabled={busy||!queryFrom||!queryTo||queryFrom>queryTo} onClick={()=>void work(consultHistory)}>{busy?'Consultando…':'Consultar'}</button>
+     </div>
+     {historyLoaded?<div className="ops-history-result">
+      <div className="ops-section-title"><h3>Compras del {queryFrom} al {queryTo}</h3><span className="ops-count">{matchedRows.length}</span></div>
+      {matchedRows.length>0&&<div className="ops-history-scroll"><table className="ops-history-table">
+       <thead><tr><th>Fecha / proveedor</th><th>Total</th><th>Ticket entregado</th><th>Mercancía recibida</th><th>Ticket recibido</th><th>Banco conciliado</th><th>Seguimiento</th></tr></thead>
+       <tbody>{matchedRows.map(p=><tr key={p.id}>
+        <td data-label="Compra"><strong>{p.supplierName}</strong><small>{p.purchaseDate} · {p.id.slice(0,12)}</small></td>
+        <td data-label="Total"><strong>{cash(p.totalCents)}</strong>{p.balanceCents>0&&<small>Saldo {cash(p.balanceCents)}</small>}</td>
+        <td data-label="Ticket entregado"><input type="checkbox" disabled readOnly checked={p.receiptDelivered===true||['delivered','received'].includes(p.documentStatus)} aria-label="Ticket entregado" title="Se marca al registrar la entrega del ticket"/></td>
+        <td data-label="Mercancía recibida"><input type="checkbox" disabled readOnly checked={['received','verified'].includes(p.goodsStatus)} aria-label="Mercancía recibida" title="Según la recepción física registrada"/></td>
+        <td data-label="Ticket recibido"><input type="checkbox" disabled readOnly checked={p.receiptAcknowledged===true||p.documentStatus==='received'} aria-label="Ticket recibido" title="Acuse del responsable de recepción"/></td>
+        <td data-label="Banco conciliado">{bankLabel(p)==='Crédito sin pago'||bankLabel(p)==='Sin cargo bancario'?<span className="ops-not-applicable">{bankLabel(p)}</span>:
+         <label className="ops-bank-cell"><input type="checkbox" disabled readOnly checked={bankVerified(p)} aria-label="Transacción bancaria conciliada" title="Solo una conciliación verificada con el statement podrá completar esta etapa"/><small>{bankVerified(p)?'Conciliado':'Pendiente'}</small></label>}</td>
+        <td data-label="Detalle"><button className="ops-row-action" type="button" onClick={()=>setSelection(p.id)}>Detalle</button></td>
+       </tr>)}</tbody>
+      </table></div>}
+      {matchedRows.length===0&&<p className="ops-hint">No hay compras en este periodo. Prueba otras fechas.</p>}
+      <p className="ops-hint">Los checkboxes son indicadores de estado, no controles para inventar una entrega o una conciliación. Los movimientos bancarios sin compra respaldada se identificarán al implementar la importación del statement.</p>
+     </div>:<div className="ops-awaiting-query"><strong>Consulta por periodo</strong><p>Elige las fechas y pulsa Consultar. No se carga un historial indefinido automáticamente.</p></div>}
+     {historyLoaded&&selected&&matchedRows.some(p=>p.id===selected.id)&&<div className="ops-transaction-details">
+      <div className="ops-section-title"><h3>Detalle · {selected.supplierName}</h3><button onClick={()=>setSelection('')}>Cerrar</button></div>
+      <div className="ops-payment-summary">
+       <div><span>Importe comprado</span><strong>{cash(selected.totalCents)}</strong></div>
+       <div><span>Pagos registrados</span><strong>{cash(selected.paidCents)}</strong></div>
+       <div><span>Saldo por pagar</span><strong>{cash(selected.balanceCents)}</strong></div>
+      </div>
+      <h3>Registrar abono de una compra a crédito</h3>
+      <div className="ops-grid-2">
+       <label>Importe del abono (CAD)<input type="number" inputMode="decimal" min="0.01" step="0.01" value={payAmount} onChange={e=>setPayAmount(e.target.value)}/></label>
+       <label>Medio de pago<select value={payMethod} onChange={e=>setPayMethod(e.target.value as OpsPayment['method'])}>{tenderMethods.map(m=><option key={m.value} value={m.value}>{m.label}</option>)}</select></label>
+      </div>
+      <button disabled={busy||selected.balanceCents<=0} onClick={()=>void work(addPayment)}>Aplicar abono</button>
+      <p className="ops-hint">Registrar el abono disminuye la deuda. No marca automáticamente el movimiento como conciliado en el banco.</p>
+     </div>}
+    </section>}
    {tab==='catalogos'&&<div className="ops-layout">
     <section className="ops-card"><h2>Proveedores y productos maestros</h2>
      <label>Nuevo proveedor<input value={newSupplier} onChange={e=>setNewSupplier(e.target.value)} placeholder="Nombre comercial"/></label>
