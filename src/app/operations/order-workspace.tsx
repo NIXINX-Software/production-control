@@ -43,7 +43,7 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
  const estimateSubtotal=orderEstimate(lines);
  const approvedSubtotal=lines.filter(l=>l.ownerAccepted&&OPS_APPROVAL_AREAS.every(a=>Boolean(l.lineApprovals?.[a]))).reduce((sum,l)=>sum+(l.requestedCents??0),0);
  const validatedLineCount=lines.filter(l=>l.ownerAccepted&&OPS_APPROVAL_AREAS.every(a=>Boolean(l.lineApprovals?.[a]))).length;
- const budgetCents=Math.round(Number(budget)*100);
+ const budgetCents=budget.trim()?Math.round(Number(budget)*100):lines.reduce((s,l)=>s+(l.requestedCents??0),0);
  const minimum=Number(minPct),maximum=Number(maxPct);
  const budgetBounds=Number.isFinite(budgetCents)&&Number.isFinite(minimum)&&Number.isFinite(maximum)?
    effectiveBudgetRange(budgetCents,minimum,maximum):null;
@@ -143,6 +143,7 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
   setPId('');setQuantity('');
  }
  async function saveOrder(){
+  if(budgetCents!==lines.reduce((s,l)=>s+(l.requestedCents??0),0))throw new Error('El presupuesto total debe coincidir con la suma solicitada por producto.');
   if(!lines.length||!Number.isSafeInteger(budgetCents)||budgetCents<1||!Number.isFinite(minimum)||!Number.isFinite(maximum)||
     minimum<0||minimum>100||maximum<100||maximum>300)throw new Error('Captura productos y presupuesto con márgenes válidos.');
   if(demoOnly){
@@ -305,6 +306,14 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
       <div className="ops-section-title"><strong>{order.folio}</strong><span>{labels[order.status]}</span></div>
       <p className="ops-hint">{order.lines.length} productos · presupuesto {money(order.requestedBudgetCents)} · estimado {money(order.estimatedSubtotalCents)}</p>
       {order.ownerComment&&<p className="ops-hint">Comentario de propietaria: {order.ownerComment}</p>}
+      <p className="ops-hint">Fecha requerida: {order.requiredDate??'No registrada'} · Estado: {order.lines.every(l=>l.ownerAccepted)?'Liberada':order.lines.some(l=>l.ownerAccepted)?'Parcial':'En proceso'}</p>
+      <div className="ops-order-table-scroll"><table className="ops-order-table"><thead><tr><th>Producto</th><th>Cantidad</th><th>Solicitado</th>{OPS_APPROVAL_AREAS.map(a=><th key={a}>{a}</th>)}<th>Comentario propietaria</th><th>Autorizar</th></tr></thead>
+       <tbody>{order.lines.map(line=><tr key={line.id}><td>{line.productName}</td><td>{line.quantity} {line.unit}</td><td>{money(line.requestedCents??line.estimateCents)}</td>
+        {OPS_APPROVAL_AREAS.map(a=><td key={a}><input type="checkbox" aria-label={'Validar '+a+' '+line.productName} checked={line.lineApprovals?.[a]?.revision===order.revision} disabled={busy||order.status==='pending_owner'||Boolean(line.lineApprovals?.[a])||!name.trim()} onChange={()=>void act(()=>lineApproval(order,line,a))}/></td>)}
+        <td><textarea rows={2} aria-label={'Comentario propietaria '+line.productName} value={comment} onChange={e=>setComment(e.target.value)} disabled={busy||order.status==='pending_owner'}/><small>{line.ownerLineComment??''}</small></td>
+        <td><input type="checkbox" aria-label={'Autorizar '+line.productName} checked={Boolean(line.ownerAccepted)} disabled={busy||order.status==='pending_owner'||(!ownerOnly&&!demoOnly)||!OPS_APPROVAL_AREAS.every(a=>line.lineApprovals?.[a]?.revision===order.revision)} onChange={e=>void act(()=>lineOwner(order,line,e.target.checked))}/></td>
+       </tr>)}</tbody></table></div>
+      <div className="ops-payment-summary"><div><span>Subtotal autorizado por producto</span><strong>{money(order.lines.filter(l=>l.ownerAccepted).reduce((s,l)=>s+(l.requestedCents??0),0))}</strong></div></div>
       {order.status!=='pending_owner'?<>
        <div className="ops-approval-grid">{OPS_APPROVAL_AREAS.map(role=><button key={role} type="button" disabled={busy||!name.trim()||Boolean(order.approvals[role])}
         onClick={()=>void act(()=>approveArea(order,role))}>{order.approvals[role]?'✓ ':'○ '}{role.toUpperCase()}{order.approvals[role]?': '+order.approvals[role]?.name:''}</button>)}</div>
@@ -327,15 +336,18 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
     <p className="ops-hint">Solo las autorizadas por la propietaria. Puedes cerrar una orden con faltantes sin borrar su historial.</p>
     {activeOrders.map(order=><div key={order.id} className="ops-order-card">
      <div className="ops-section-title"><strong>{order.folio}</strong><span>{labels[order.status]}</span></div>
-     <p className="ops-hint">Solicitado {money(order.requestedBudgetCents)} · rango {money(order.minBudgetCents)} a {money(order.maxBudgetCents)}</p>
+     <p className="ops-hint">Fecha requerida: {order.requiredDate??'Sin fecha'} · Solicitado {money(order.requestedBudgetCents)} · rango {money(order.minBudgetCents)} a {money(order.maxBudgetCents)}</p>
      {order.lines.map(line=><div className="ops-supply-line" key={line.id}>
       <strong>{line.productName}</strong><small>{line.quantity} {line.unit} pedidos · {labels[line.supplyStatus]}</small>
       <div className="ops-supply-controls">
        <label>Abastecidos ({line.unit})<input type="number" min="0" max={line.quantity} step="any"
         value={supplies[line.id]??String(line.suppliedBaseAmount/(baseAmount(1,line.unit)))}
         onChange={e=>setSupplies(x=>({...x,[line.id]:e.target.value}))}/></label>
-       <button type="button" disabled={busy} onClick={()=>void act(()=>markSupply(order,line,Number(supplies[line.id]??0)))}>Parcial / pendiente</button>
-       <button type="button" disabled={busy||line.supplyStatus==='complete'} onClick={()=>void act(()=>markSupply(order,line,line.quantity))}>✓ Completo</button>
+       <label>Estatus<select aria-label={'Estatus de abastecimiento '+line.productName} disabled={busy} value={line.supplyStatus} onChange={e=>{const val=e.target.value;const amount=val==='pending'?0:val==='complete'?line.quantity:Number(supplies[line.id]??0);void act(()=>markSupply(order,line,amount,supplyNotes[line.id]??line.note??''));}}>
+         <option value="pending">Pendiente</option><option value="partial">Parcial</option><option value="complete">Completo</option>
+       </select></label>
+       <label>Comentarios<input aria-label={'Observación de abastecimiento '+line.productName} value={supplyNotes[line.id]??line.note??''} onChange={e=>setSupplyNotes(x=>({...x,[line.id]:e.target.value}))}/></label>
+       <button type="button" disabled={busy} onClick={()=>void act(()=>markSupply(order,line,Number(supplies[line.id]??line.suppliedBaseAmount/baseAmount(1,line.unit)),supplyNotes[line.id]??line.note??''))}>Guardar abastecimiento</button>
       </div>
      </div>)}
      <button className="ops-primary" disabled={busy} onClick={()=>void act(()=>close(order))}>Dar orden por atendida / cerrar</button>
