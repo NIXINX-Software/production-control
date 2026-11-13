@@ -1,7 +1,8 @@
 import {NextRequest,NextResponse} from 'next/server';
 import {getApps,initializeApp,cert} from 'firebase-admin/app';
 import {getFirestore,FieldValue,type Firestore} from 'firebase-admin/firestore';
-import {db,requireSameOrigin,requireSuperAdmin,text,validDate} from '@/lib/pc-server';
+import {db,requireSameOrigin,requireSuperAdmin,text} from '@/lib/pc-server';
+import {csvExport} from '@/lib/pc-operational-files';
 import {
   OPS_UNITS,isOpsSite,measureOf,normalUnit,baseAmount,validMoneyCents,validDate as opsDate,
   isRecord,purchaseBalances,bankStatusForPayments,type OpsSite,type OpsPayment,type OpsSnapshot
@@ -47,6 +48,31 @@ function fail(error:unknown){
 export async function GET(req:NextRequest){
  try{
   const {site,store}=await authorize(req,req.nextUrl.searchParams.get('site'));
+  const view=req.nextUrl.searchParams.get('view');
+  if(view && view!=='export')throw new Error('INVALID_VIEW');
+  if(view==='export'){
+    // Export never trusts front-end role checks: authorize() rechecks
+    // Firebase ID token + superadmin email/role + explicit site grant.
+    // Bounded first increment; this is NOT a certified or complete DWH feed.
+    const purchases=await siteRows(store,'ops_purchases',site);
+    const rows=purchases.docs.map(d=>{
+      const p=d.data();
+      return [site,d.id,p.purchaseDate??'',p.supplierId??'',p.supplierName??'',
+        p.totalCents??'',p.paidCents??'',p.balanceCents??'',p.goodsStatus??'',
+        p.documentStatus??'',p.bankStatus??'',p.dueDate??''];
+    });
+    const body=csvExport(
+      ['site_id','purchase_id','purchase_date','supplier_id','supplier_name','total_cents','paid_cents','balance_cents','goods_status','document_status','bank_status','due_date'],
+      rows);
+    return new NextResponse(body,{headers:{
+      'Content-Type':'text/csv; charset=utf-8',
+      'Content-Disposition':`attachment; filename="operations_${site}_purchases_sample.csv"`,
+      'Cache-Control':'private, no-store',
+      'X-Content-Type-Options':'nosniff',
+      'X-Data-Quality':'NOT_CERTIFIED',
+      'X-Records-Limit':String(MAX_RESULTS)
+    }});
+  }
   const [p,s,pr,pu,pa,r,d]=await Promise.all([
     siteRows(store,'ops_products',site),siteRows(store,'ops_suppliers',site),siteRows(store,'ops_presentations',site),
     siteRows(store,'ops_purchases',site),siteRows(store,'ops_payments',site),siteRows(store,'ops_receipts',site),
