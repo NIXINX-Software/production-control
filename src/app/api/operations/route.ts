@@ -1,8 +1,7 @@
 import {NextRequest,NextResponse} from 'next/server';
 import {getApps,initializeApp,cert} from 'firebase-admin/app';
 import {getFirestore,FieldValue,type Firestore} from 'firebase-admin/firestore';
-import {db,requireSameOrigin,text} from '@/lib/pc-server';
-import {requireWorkspaceAccess,mayUseOpsAction,type WorkspaceRole} from '@/lib/workspace-access';
+import {db,requireSameOrigin,requireSuperAdmin,text} from '@/lib/pc-server';
 import {csvExport} from '@/lib/pc-operational-files';
 import {
   OPS_UNITS,isOpsSite,measureOf,normalUnit,baseAmount,validMoneyCents,validDate as opsDate,
@@ -27,9 +26,10 @@ function operationsStore():Firestore {
   })},sandboxName);
   return getFirestore(app);
 }
-async function authorize(request:NextRequest,site:unknown):Promise<{site:OpsSite;actor:string;role:WorkspaceRole}>{
-  const identity=await requireWorkspaceAccess(request,site,['admin','ops_buyer','ops_backoffice']);
-  return {site:identity.siteId,actor:identity.uid,role:identity.role};
+async function authorize(request:NextRequest,site:unknown,exporting=false):Promise<{site:OpsSite;actor:string;store:Firestore}>{
+  if(!isOpsSite(site))throw new Error('INVALID_SITE');
+  if(exporting){const identity=await requireSuperAdmin(request);return {site,actor:identity.uid,store:operationsStore()};}
+  return {site,actor:'operations-station',store:operationsStore()};
 }
 const invalid=(v:unknown)=>typeof v!=='string'||v.length<2;
 const mapDocs=(s:FirebaseFirestore.QuerySnapshot)=>s.docs.map(d=>({id:d.id,...d.data()}));
@@ -37,18 +37,16 @@ const siteRows=(store:Firestore,col:string,site:OpsSite)=>store.collection(col).
 const docId=(site:OpsSite)=>site+'_'+crypto.randomUUID();
 function fail(error:unknown){
  const message=error instanceof Error?error.message:'OPS_ERROR';
- const status=message==='ADMIN_AUTH_REQUIRED'?401:message==='SUPERADMIN_REQUIRED'||message==='ADMIN_ROLE_REQUIRED'||message==='OPS_SITE_FORBIDDEN'||message==='WORKSPACE_SITE_FORBIDDEN'||message==='WORKSPACE_FORBIDDEN'||message==='FORBIDDEN'?403:
+ const status=message==='ADMIN_AUTH_REQUIRED'?401:message==='SUPERADMIN_REQUIRED'||message==='ADMIN_ROLE_REQUIRED'||message==='OPS_SITE_FORBIDDEN'||message==='FORBIDDEN'?403:
    message==='CONFLICT'||message==='PAYMENT_EXCEEDS_TOTAL'?409:message.includes('NOT_CONFIGURED')||message==='OPS_RELEASE_DISABLED'?503:400;
  console.error('NIXINX Operations:',message);
  return NextResponse.json({error:message},{status,headers:{'Cache-Control':'no-store'}});
 }
 export async function GET(req:NextRequest){
  try{
-  const {site,role}=await authorize(req,req.nextUrl.searchParams.get('site'));
   const view=req.nextUrl.searchParams.get('view');
-  if(view && !['access','export','history'].includes(view))throw new Error('INVALID_VIEW');
-  if(view==='access')return NextResponse.json({role,siteId:site},{headers:{'Cache-Control':'private,no-store'}});
-  const store=operationsStore();
+  const {site,store}=await authorize(req,req.nextUrl.searchParams.get('site'),view==='export');
+  if(view && view!=='export' && view!=='history')throw new Error('INVALID_VIEW');
   if(view==='history'){
     const from=req.nextUrl.searchParams.get('from');
     const to=req.nextUrl.searchParams.get('to');
@@ -66,7 +64,6 @@ export async function GET(req:NextRequest){
       {headers:{'Cache-Control':'private,no-store'}});
   }
   if(view==='export'){
-    if(role!=='admin')throw new Error('WORKSPACE_FORBIDDEN');
     // Export never trusts front-end role checks: authorize() rechecks
     // Firebase ID token + superadmin email/role + explicit site grant.
     // Bounded first increment; this is NOT a certified or complete DWH feed.
@@ -97,7 +94,7 @@ export async function GET(req:NextRequest){
   const data:OpsSnapshot={products:mapDocs(p) as OpsSnapshot['products'],suppliers:mapDocs(s) as OpsSnapshot['suppliers'],
    presentations:mapDocs(pr) as OpsSnapshot['presentations'],purchases:mapDocs(pu) as OpsSnapshot['purchases'],
    payments:mapDocs(pa) as OpsSnapshot['payments'],receipts:mapDocs(r) as OpsSnapshot['receipts'],documents:mapDocs(d) as OpsSnapshot['documents']};
-  return NextResponse.json({data:role==='ops_buyer'?{...data,products:[],presentations:[],receipts:[]}:data,siteId:site,source:'firestore',contractVersion:'ops.purchases.v0.1'}, {headers:{'Cache-Control':'private,no-store'}});
+  return NextResponse.json({data,siteId:site,source:'firestore',contractVersion:'ops.purchases.v0.1'}, {headers:{'Cache-Control':'no-store'}});
  }catch(e){return fail(e);}
 }
 export async function POST(req:NextRequest){
@@ -105,10 +102,8 @@ export async function POST(req:NextRequest){
   requireSameOrigin(req);
   const body=await req.json() as Record<string,unknown>;
   if(!isRecord(body))throw new Error('INVALID_REQUEST');
-  const {site,actor,role}=await authorize(req,body.siteId);
+  const {site,actor,store}=await authorize(req,body.siteId);
   const action=body.action;
-  if(typeof action!=='string'||!mayUseOpsAction(role,action,body.status))throw new Error('WORKSPACE_FORBIDDEN');
-  const store=operationsStore();
   const now=FieldValue.serverTimestamp();
   if(action==='supplier.add'){
     const name=text(body.name,120);
