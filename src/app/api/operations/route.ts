@@ -258,10 +258,13 @@ export async function POST(req:NextRequest){
     const eligible=bankRows.docs.filter(x=>['debit_card','credit_card','card','transfer','other'].includes(x.data().method));
     if(eligible.length===0)throw new Error('NO_BANK_PAYMENT_TO_RECONCILE');
     const ref=store.collection('ops_purchases').doc(purchaseId);
+    const folio=action==='bank.reconcile'?await nextOpsFolio(store,site,'CON'):null;
     await store.runTransaction(async tx=>{
       const p=(await tx.get(ref)).data();
       if(!p||p.siteId!==site||p.cancelled===true)throw new Error('INVALID_PURCHASE');
+      if(action==='bank.reconcile'&&p.bankStatus==='reconciled'||action==='bank.unreconcile'&&p.bankStatus!=='reconciled')throw new Error('BANK_STATUS_ALREADY_APPLIED');
       tx.update(ref,{bankStatus:action==='bank.reconcile'?'reconciled':'pending_reconciliation',
+        ...(folio?{bankReconciliationFolio:folio}:{}),
         bankReference:reference,bankReviewer:reviewer,bankReviewedAt:now,updatedAt:now});
       tx.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId,action,reference,reviewer,actor,createdAt:now});
     });
