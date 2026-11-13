@@ -227,7 +227,7 @@ export async function POST(req:NextRequest){
   }
   if(action==='payment.add'){
     const id=text(body.purchaseId,130),amount=body.amountCents,method=body.method,date=body.paidDate;
-    if(!validMoneyCents(amount)||!opsDate(date)||!['cash','debit_card','credit_card','credit_note','card','transfer','other'].includes(String(method)))throw new Error('INVALID_PAYMENT');
+    if(!validMoneyCents(amount)||!opsDate(date)||!['cash','debit_card','credit_card','card','transfer','other'].includes(String(method)))throw new Error('INVALID_PAYMENT');
     const ref=store.collection('ops_purchases').doc(id),payment=store.collection('ops_payments').doc(docId(site));
     await store.runTransaction(async tx=>{
       const snapshot=await tx.get(ref),p=snapshot.data();
@@ -238,6 +238,34 @@ export async function POST(req:NextRequest){
       tx.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId:id,action:'payment.registered',amountCents:amount,method,actor,createdAt:now});
     });
     return NextResponse.json({ok:true,id:payment.id});
+  }
+  if(action==='goods.complete'){
+    const purchaseId=text(body.purchaseId,140),ref=store.collection('ops_purchases').doc(purchaseId);
+    await store.runTransaction(async tx=>{
+      const purchase=(await tx.get(ref)).data();
+      if(!purchase||purchase.siteId!==site||purchase.cancelled===true||purchase.goodsStatus==='verified')throw new Error('INVALID_PURCHASE');
+      if(!(purchase.receiptCount>0))throw new Error('RECEIPT_ITEMS_REQUIRED');
+      tx.update(ref,{goodsStatus:'verified',goodsVerifiedBy:text(body.verifier,120)||actor,
+        goodsVerifiedAt:now,updatedAt:now});
+      tx.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId,action:'goods.closed',actor,createdAt:now});
+    });
+    return NextResponse.json({ok:true});
+  }
+  if(action==='bank.reconcile'||action==='bank.unreconcile'){
+    const purchaseId=text(body.purchaseId,140),reference=text(body.reference,140),reviewer=text(body.reviewer,120);
+    if(reference.trim().length<3||reviewer.trim().length<2)throw new Error('BANK_REFERENCE_AND_REVIEWER_REQUIRED');
+    const bankRows=await store.collection('ops_payments').where('purchaseId','==',purchaseId).get();
+    const eligible=bankRows.docs.filter(x=>['debit_card','credit_card','card','transfer','other'].includes(x.data().method));
+    if(eligible.length===0)throw new Error('NO_BANK_PAYMENT_TO_RECONCILE');
+    const ref=store.collection('ops_purchases').doc(purchaseId);
+    await store.runTransaction(async tx=>{
+      const p=(await tx.get(ref)).data();
+      if(!p||p.siteId!==site||p.cancelled===true)throw new Error('INVALID_PURCHASE');
+      tx.update(ref,{bankStatus:action==='bank.reconcile'?'reconciled':'pending_reconciliation',
+        bankReference:reference,bankReviewer:reviewer,bankReviewedAt:now,updatedAt:now});
+      tx.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId,action,reference,reviewer,actor,createdAt:now});
+    });
+    return NextResponse.json({ok:true});
   }
   if(action==='goods.verify'){
     const id=text(body.purchaseId,130),verifier=text(body.verifier,120);
@@ -257,8 +285,9 @@ export async function POST(req:NextRequest){
     const ref=store.collection('ops_purchases').doc(id);
     await store.runTransaction(async tx=>{
       const doc=await tx.get(ref),p=doc.data();
-      if(!p||p.siteId!==site||!['captured','delivered','received','rejected'].includes(p.documentStatus))throw new Error('INVALID_DOCUMENT_STATE');
-      if((status==='received'||status==='rejected')&&p.documentStatus!=='delivered'||status==='delivered'&&!['captured','rejected'].includes(p.documentStatus))throw new Error('INVALID_DOCUMENT_STATE');
+      if(!p||p.siteId!==site||p.cancelled===true)throw new Error('INVALID_DOCUMENT_STATE');
+      // A physical original may be handed over without a photographed copy.
+      if(status==='rejected'&&!['delivered','received'].includes(p.documentStatus))throw new Error('INVALID_DOCUMENT_STATE');
       tx.update(ref,{documentStatus:status,receiptDelivered:status==='delivered'||status==='received',receiptAcknowledged:status==='received',updatedAt:now});
       tx.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId:id,action:'document.'+status,recipient,actor,createdAt:now});
     });
@@ -273,11 +302,11 @@ export async function POST(req:NextRequest){
     const product=(await store.collection('ops_products').doc(presentation.productId).get()).data();
     if(!product||product.siteId!==site||product.active!==true)throw new Error('INVALID_PRODUCT');
     const purchaseRef=store.collection('ops_purchases').doc(purchaseId);
-    const receiptRef=store.collection('ops_receipts').doc(docId(site));
+    const receiptRef=store.collection('ops_receipts').doc(docId(site)),folio=await nextOpsFolio(store,site,'REC');
     await store.runTransaction(async tx=>{
       const purchase=(await tx.get(purchaseRef)).data();
-      if(!purchase||purchase.siteId!==site)throw new Error('INVALID_PURCHASE');
-      tx.create(receiptRef,{siteId:site,purchaseId,productId:presentation.productId,productName:product.name,presentationId,
+      if(!purchase||purchase.siteId!==site||purchase.cancelled===true||purchase.goodsStatus==='verified')throw new Error('INVALID_PURCHASE');
+      tx.create(receiptRef,{siteId:site,folio,purchaseId,purchaseDate:purchase.purchaseDate,productId:presentation.productId,productName:product.name,presentationId,
         presentationLabel:presentation.label,packQuantity,receivedBaseAmount:Math.round(packQuantity*presentation.unitAmount*1e6)/1e6,
         unit:presentation.unit,lineTotalCents:lineTotalCents??null,createdBy:actor,createdAt:now});
       tx.update(purchaseRef,{goodsStatus:state,receiptCount:FieldValue.increment(1),updatedAt:now});
