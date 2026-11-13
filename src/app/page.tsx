@@ -357,6 +357,7 @@ export default function Home(){
  if(kitchenAccess!=='allowed')return <main className="ux-loading" style={{display:'grid',placeItems:'center',padding:20}}>
    <section style={{maxWidth:400,width:'100%',padding:24,background:'white',borderRadius:16,display:'grid',gap:12}}>
    <h1>Producción y Conteos</h1><p>Acceso exclusivo para personal de cocina autorizado. Compras y Control operativo tienen accesos separados.</p>
+   <label>Sucursal<select value={site} onChange={e=>{setKitchenAccess('checking');changeSite(e.target.value as Site);}}>{locations.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
    {adminUser?<><p>Sesión: {adminUser.email}</p><p role="alert">{kitchenError}</p><button onClick={()=>void signOut(auth!)}>Cambiar de cuenta</button></>:
     <><label>Correo electrónico<input type="email" value={kitchenEmail} onChange={e=>setKitchenEmail(e.target.value)}/></label>
     <label>Contraseña<input type="password" value={kitchenPassword} onChange={e=>setKitchenPassword(e.target.value)}/></label>
