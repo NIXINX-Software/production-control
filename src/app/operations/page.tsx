@@ -89,6 +89,8 @@ export default function Operations(){
  const currentPresentation=active.presentations.find(x=>x.id===receivingPresentation&&x.productId===receivingProduct);
  const receivingProductObj=active.products.find(x=>x.id===receivingProduct);
  const receivingPresentations=active.presentations.filter(x=>x.productId===receivingProduct);
+ const nameKey=(value:string)=>value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('es').trim().replace(/\s+/g,' ');
+ const alreadyExists=active.products.find(p=>nameKey(p.name)===nameKey(newProduct)&&p.active);
  const tenderTotalCents=tenders.reduce((sum,p)=>sum+(p.amount.trim()?Math.round(Number(p.amount.replace(',','.'))*100):0),0);
  const draftCents=total.trim()?Math.round(Number(total.replace(',','.'))*100):0;
  const draftBalance=draftCents-tenderTotalCents;
@@ -154,7 +156,8 @@ export default function Operations(){
   setNewSupplier('');setInlineNewSupplier(false);
  }
  async function addProduct(){
-  if(newProduct.trim().length<2)throw new Error('Escribe el nombre del producto.');
+  if(newProduct.trim().length<2)throw new Error('Escribe el nombre del producto maestro.');
+  if(alreadyExists)throw new Error('Este producto maestro ya existe. Selecciónalo y agrega la presentación que necesites.');
   if(mode==='live'){const r=await request('product.add',{name:newProduct,unit:productUnit});await refreshLive();if(r.id){setPresentationProduct(r.id);setReceivingProduct(r.id);setReceivingPresentation('');setPackUnit(productUnit);}}
   else{const id=genId(site);setData(d=>({...d,products:[...d.products,{id,siteId:site,name:newProduct.trim(),unit:productUnit,active:true}]}));setPresentationProduct(id);setReceivingProduct(id);setReceivingPresentation('');setPackUnit(productUnit);}
   setNewProduct('');setInlineNewProduct(false);
@@ -383,13 +386,18 @@ export default function Operations(){
       <option value="">Selecciona la compra</option>{active.purchases.map(p=><option key={p.id} value={p.id}>{p.purchaseDate} · {p.supplierName} · {cash(p.totalCents)}</option>)}</select></label>
      {selected&&<div className="ops-receive-context"><strong>{selected.supplierName}</strong><span>Total de compra: {cash(selected.totalCents)}</span><span>Comprobante: {status(selected.documentStatus)}</span></div>}
      <div className="ops-divider"/>
-     <div className="ops-section-title"><h3>1 · Producto recibido</h3><button type="button" onClick={()=>setInlineNewProduct(!inlineNewProduct)}>{inlineNewProduct?'Cancelar':'+ Nuevo producto'}</button></div>
+     <div className="ops-section-title"><h3>1 · Producto maestro</h3><button type="button" onClick={()=>setInlineNewProduct(!inlineNewProduct)}>{inlineNewProduct?'Cancelar':'+ Crear producto maestro'}</button></div>
      <label>Producto maestro<select value={receivingProduct} onChange={e=>{const id=e.target.value;setReceivingProduct(id);setPresentationProduct(id);setReceivingPresentation('');const p=active.products.find(x=>x.id===id);if(p)setPackUnit(p.unit);}}>
-      <option value="">Selecciona producto</option>{active.products.map(p=><option key={p.id} value={p.id}>{p.name} ({p.unit})</option>)}</select></label>
+      <option value="">Selecciona el ingrediente o artículo</option>{active.products.map(p=><option key={p.id} value={p.id}>{p.name} ({p.unit})</option>)}</select></label>
+     <p className="ops-hint">Busca primero el producto maestro. Un mismo queso feta conserva su identidad aunque cambie el proveedor, la bolsa o el precio.</p>
      {inlineNewProduct&&<div className="ops-inline-editor">
-      <h3>Crear producto maestro</h3><label>Nombre<input value={newProduct} onChange={e=>setNewProduct(e.target.value)} placeholder="Ej. Queso feta"/></label>
+      <h3>Crear un nuevo producto maestro</h3>
+      <p className="ops-hint">Úsalo únicamente si el producto base no existe. Para diferentes tamaños o empaques utiliza <strong>+ Nueva presentación</strong>; el proveedor y el precio se conservan en la compra.</p>
+      <label>Nombre del producto base<input value={newProduct} onChange={e=>setNewProduct(e.target.value)} placeholder="Ej. Queso feta"/></label>
       <label>Unidad de control<select value={productUnit} onChange={e=>setProductUnit(e.target.value as 'kg'|'l'|'unit')}><option value="kg">Masa (kg)</option><option value="l">Volumen (L)</option><option value="unit">Piezas</option></select></label>
-      <button type="button" disabled={busy||newProduct.trim().length<2} onClick={()=>void work(addProduct)}>Crear y seleccionar producto</button>
+      {alreadyExists&&<p className="ops-duplicate-hint">Ya existe <strong>{alreadyExists.name}</strong> en esta empresa. Selecciónalo en lugar de duplicarlo.</p>}
+      <button type="button" disabled={busy||newProduct.trim().length<2||Boolean(alreadyExists)} onClick={()=>void work(addProduct)}>Guardar producto maestro</button>
+      {alreadyExists&&<button type="button" onClick={()=>{setReceivingProduct(alreadyExists.id);setPresentationProduct(alreadyExists.id);setReceivingPresentation('');setPackUnit(alreadyExists.unit);setInlineNewProduct(false);setNewProduct('');}}>Utilizar {alreadyExists.name}</button>}
      </div>}
      <div className="ops-divider"/>
      <div className="ops-section-title"><h3>2 · Presentación</h3><button type="button" disabled={!receivingProductObj} onClick={()=>{setPresentationProduct(receivingProduct);if(receivingProductObj)setPackUnit(receivingProductObj.unit);setInlineNewPresentation(!inlineNewPresentation);}}>{inlineNewPresentation?'Cancelar':'+ Nueva presentación'}</button></div>
@@ -404,7 +412,7 @@ export default function Operations(){
      </div>}
      <div className="ops-divider"/>
      <h3>3 · Cantidad y costo del artículo</h3>
-     <div className="ops-grid-2"><label>Paquetes recibidos<input type="number" min="0.001" step="any" inputMode="decimal" value={receivedPacks} onChange={e=>setReceivedPacks(e.target.value)}/></label>
+     <div className="ops-grid-2 ops-receive-amount-row"><label>Paquetes recibidos<input type="number" min="0.001" step="any" inputMode="decimal" value={receivedPacks} onChange={e=>setReceivedPacks(e.target.value)}/></label>
       <label>Importe del artículo antes de impuestos (CAD)<input type="number" min="0" step="0.01" inputMode="decimal" placeholder="Opcional" value={lineCost} onChange={e=>setLineCost(e.target.value)}/></label></div>
      {currentPresentation&&<div className="ops-measure"><span>Cantidad equivalente recibida</span><strong>{Number.isFinite(Number(receivedPacks)*currentPresentation.unitAmount)?(Number(receivedPacks)*currentPresentation.unitAmount).toLocaleString('es-CA',{maximumFractionDigits:6}):'—'} {currentPresentation.unit}</strong>
       <small>{receivedPacks||0} paquete(s) de {currentPresentation.label}</small></div>}
@@ -476,7 +484,8 @@ export default function Operations(){
      <label>Nuevo producto maestro<input value={newProduct} onChange={e=>setNewProduct(e.target.value)} placeholder="Ej. Queso feta"/></label>
      <label>Unidad base<select value={productUnit} onChange={e=>setProductUnit(e.target.value as 'kg'|'l'|'unit')}>
       <option value="kg">Kilogramos (masa)</option><option value="l">Litros (volumen)</option><option value="unit">Piezas (conteo)</option></select></label>
-     <button disabled={busy||newProduct.trim().length<2} onClick={()=>void work(addProduct)}>+ Crear producto maestro</button>
+     {alreadyExists&&<p className="ops-duplicate-hint">Este producto maestro ya existe: {alreadyExists.name}. Selecciónalo en la lista de presentaciones.</p>}
+     <button disabled={busy||newProduct.trim().length<2||Boolean(alreadyExists)} onClick={()=>void work(addProduct)}>+ Crear producto maestro</button>
     </section>
     <section className="ops-card"><h2>Presentaciones por producto</h2>
      <label>Producto maestro<select value={presentationProduct} onChange={e=>{setPresentationProduct(e.target.value);const p=active.products.find(x=>x.id===e.target.value);if(p)setPackUnit(p.unit);}}>
