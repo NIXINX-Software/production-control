@@ -49,7 +49,7 @@ export default function Operations(){
  const [user,setUser]=useState<User|null>(null),[email,setEmail]=useState(''),[password,setPassword]=useState('');
  const [busy,setBusy]=useState(false),[msg,setMsg]=useState(''),[selection,setSelection]=useState('');
  const [supplierId,setSupplierId]=useState(''),[total,setTotal]=useState(''),[purchaseDate,setPurchaseDate]=useState(dateToday());
- const [terms,setTerms]=useState('30'),[tenders,setTenders]=useState<Tender[]>([]),[notes,setNotes]=useState('');
+ const [terms,setTerms]=useState(''),[tenders,setTenders]=useState<Tender[]>([]),[notes,setNotes]=useState('');
  const [historyOpen,setHistoryOpen]=useState(false),[historyLoaded,setHistoryLoaded]=useState(false),[recentSaved,setRecentSaved]=useState('');
  const [queryFrom,setQueryFrom]=useState(()=>{const d=new Date();d.setDate(d.getDate()-30);return d.toLocaleDateString('en-CA',{timeZone:'America/Toronto'});}),[queryTo,setQueryTo]=useState(dateToday());
  const [receiptDeliveredAtPurchase,setReceiptDeliveredAtPurchase]=useState(false),[inlineNewSupplier,setInlineNewSupplier]=useState(false),[inlineNewProduct,setInlineNewProduct]=useState(false),[inlineNewPresentation,setInlineNewPresentation]=useState(false);
@@ -144,7 +144,7 @@ export default function Operations(){
    return 'Pendiente de statement';
  };
  const bankVerified=(p:OpsPurchase)=>p.bankStatus==='reconciled';
- async function work(job:()=>Promise<void>){setBusy(true);setMsg('');try{await job();setMsg('Operación completada.');}
+ async function work(job:()=>Promise<void>){setBusy(true);setMsg('');try{await job();setMsg(current=>current||'Operación completada.');}
   catch(e){setMsg('No se completó: '+(e instanceof Error?e.message:String(e)));}finally{setBusy(false);}}
  function chooseSite(v:OpsSite){setSite(v);setScope([v]);setSuperadminVerified(false);if(tab==='datos')setTab('compras');setSelection('');setSupplierId('');setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');setHistoryLoaded(false);setHistoryOpen(false);setRecentSaved('');}
  async function addSupplier(){
@@ -178,8 +178,8 @@ export default function Operations(){
    payments.push({method:p.method,amountCents});
   }
   const b=purchaseBalances(cents,payments.map(p=>p.amountCents));
-  const days=Number(terms);
-  if(!Number.isInteger(days)||days<0||days>365)throw new Error('El plazo de crédito debe estar entre 0 y 365 días.');
+  const days=terms.trim()?Number(terms):null;
+  if(days!==null&&(!Number.isInteger(days)||days<1||days>365))throw new Error('El plazo de crédito debe ser de 1 a 365 días o dejarse en blanco.');
   if(receiptDeliveredAtPurchase&&!evidence)throw new Error('Adjunta el comprobante antes de marcarlo como entregado.');
   if(mode==='live'){
    const result=await request('purchase.add',{supplierId:supplier.id,totalCents:cents,purchaseDate,termsDays:days,initialPayments:payments,notes});
@@ -194,7 +194,7 @@ export default function Operations(){
    }
   }else{
    const id=genId(site);
-   const due=b.balanceCents?new Date(Date.parse(purchaseDate+'T12:00:00Z')+days*86400000).toISOString().slice(0,10):null;
+   const due=b.balanceCents&&days!==null?new Date(Date.parse(purchaseDate+'T12:00:00Z')+days*86400000).toISOString().slice(0,10):null;
    const row:OpsPurchase={id,siteId:site,purchaseDate,supplierId:supplier.id,supplierName:supplier.name,totalCents:cents,
      currency:'CAD',...b,dueDate:due,goodsStatus:'pending',documentStatus:evidence?(receiptDeliveredAtPurchase?'delivered':'captured'):'missing',
      bankStatus:bankStatusForPayments(payments.map(p=>p.method)),receiptCount:0,documentCount:evidence?1:0,
@@ -205,7 +205,7 @@ export default function Operations(){
      documents:evidence?[...d.documents,{id:genId(site),siteId:site,purchaseId:id,storagePath:'demo:image-resized-locally',mime:'image/jpeg',size:evidence.size}]:d.documents}));
    setSelection(id);
   }
-  setNotes('');setTotal('');setTenders([]);setEvidence(null);setReceiptDeliveredAtPurchase(false);setRecentSaved('Compra guardada. Para consultarla o hacer seguimiento utiliza un periodo de fechas.');setHistoryLoaded(false);
+  setNotes('');setTerms('');setTotal('');setTenders([]);setEvidence(null);setReceiptDeliveredAtPurchase(false);setRecentSaved('Compra guardada. Para consultarla o hacer seguimiento utiliza un periodo de fechas.');setHistoryLoaded(false);
  }
  async function addPayment(){
   if(!selected)throw new Error('Selecciona una compra.');
@@ -343,7 +343,7 @@ export default function Operations(){
        {draftCents>0&&draftBalance>0&&<div className="ops-remaining"><span>Saldo pendiente (crédito)</span><strong>{cash(draftBalance)}</strong></div>}
        {draftCents>0&&draftBalance===0&&<div className="ops-remaining"><span>Compra cubierta</span><strong>✓</strong></div>}
      </div>
-     {draftBalance>0&&<label>Plazo de pago (días)<input type="number" min="0" max="365" step="1" value={terms} onChange={e=>setTerms(e.target.value)}/></label>}
+     {draftBalance>0&&<label>Plazo pactado a crédito (días, opcional)<input type="number" min="1" max="365" step="1" placeholder="Sin plazo definido" value={terms} onChange={e=>setTerms(e.target.value)}/></label>}
      {draftBalance<0&&<p className="ops-error">Los pagos no pueden superar el total de la compra.</p>}
      <div className="ops-receipt-picker">
       <h3>Fotografía del ticket o factura</h3>
