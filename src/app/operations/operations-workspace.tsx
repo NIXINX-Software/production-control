@@ -136,6 +136,15 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
    });
    return ()=>{cancelled=true;};
  },[mode,user,site,workspace,workspaceAuthorized]);
+ useEffect(()=>{
+   if(mode!=='live')return;
+   let current=true;
+   fetch('/api/operations/orders?view=orders&site='+site,{cache:'no-store'}).then(async r=>{
+    if(!r.ok)return {orders:[]};return await r.json() as {orders?:OpsOrder[]};
+   }).then(r=>{if(current)setPurchaseOrderOptions((r.orders??[]).filter(o=>o.status==='approved'));})
+     .catch(()=>{if(current)setPurchaseOrderOptions([]);});
+   return ()=>{current=false;};
+ },[site,mode,tab]);
  const active=useMemo(()=>filterSite(data,site),[data,site]);
  const purchases=useMemo(()=>data.purchases.filter(p=>scope.includes(p.siteId)),[data,scope]);
  const selected=data.purchases.find(p=>p.id===selection&&p.siteId===site);
@@ -430,16 +439,22 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
      <p className="ops-hint">Para operaciones reales, el servidor exige <code>portal_users.opsSiteIds</code> y un proyecto Firebase autorizado. Preview nunca escribe en el Firestore productivo.</p>
    </div>}
    {msg&&<div className="ops-feedback" role="status">{msg}<button onClick={()=>setMsg('')}>×</button></div>}
-   <nav className="ops-tabs" aria-label="Operaciones">{tabs.filter(t=>workspace==='compras'?t.id==='compras':workspace==='control'?['recepcion','conciliacion','catalogos','kpis'].includes(t.id):
+   <nav className="ops-tabs" aria-label="Operaciones">{tabs.filter(t=>workspace==='compras'?['compras','ordenes'].includes(t.id):workspace==='control'?['recepcion','conciliacion','proveedores','planeacion','costos','catalogos','kpis'].includes(t.id):
       t.id==='showroom'?showroomVisible:
       t.id==='datos'?(!demoMode&&user&&superadminVerified):true
     ).map(t=><button key={t.id} className={tab===t.id?'active':''} onClick={()=>setTab(t.id)}>{t.title}</button>)}</nav>
+   {(['ordenes','planeacion','costos','proveedores'] as Panel[]).includes(tab)&&
+      <OrderWorkspace panel={tab as 'ordenes'|'planeacion'|'costos'|'proveedores'} site={site} data={active} demo={demoMode} user={user} workspace={workspace}/>}
    {tab==='compras'&&<div className="ops-capture-layout">
     <section className="ops-card ops-purchase-form">
      <h2>Nueva compra</h2>
      <label>Proveedor<select value={supplierId} onChange={e=>setSupplierId(e.target.value)}><option value="">Seleccionar proveedor</option>
        {active.suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-     <div className="ops-quick-add"><button type="button" onClick={()=>setInlineNewSupplier(p=>!p)}>{inlineNewSupplier?'Cancelar':'+ Proveedor'}</button></div>
+     {purchaseOrderOptions.length>0&&<details className="ops-purchase-extra"><summary>Vincular a una orden aprobada (opcional)</summary>
+        <label>Orden de compra<select value={purchaseOrderId} onChange={e=>setPurchaseOrderId(e.target.value)}>
+         <option value="">Compra sin orden previa</option>{purchaseOrderOptions.map(o=><option key={o.id} value={o.id}>{o.folio}</option>)}
+        </select></label></details>}
+      <div className="ops-quick-add"><button type="button" onClick={()=>setInlineNewSupplier(p=>!p)}>{inlineNewSupplier?'Cancelar':'+ Proveedor'}</button></div>
      {inlineNewSupplier&&<div className="ops-inline-editor">
        <label>Nombre del proveedor<input value={newSupplier} onChange={e=>setNewSupplier(e.target.value)} placeholder="Ej. Proveedor local"/></label>
        <button disabled={busy||newSupplier.trim().length<2} onClick={()=>void work(addSupplier)}>Guardar y seleccionar proveedor</button>
@@ -463,13 +478,14 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
        {draftCents>0&&draftBalance===0&&<div className="ops-remaining"><span>Compra cubierta</span><strong>✓</strong></div>}
      </div>
      {draftBalance>0&&<label>Plazo pactado a crédito (días, opcional)<input type="number" min="1" max="365" step="1" placeholder="Sin plazo definido" value={terms} onChange={e=>setTerms(e.target.value)}/></label>}
-     {draftBalance<0&&<p className="ops-error">Los pagos no pueden superar el total de la compra.</p>}
+     {(draftBalance<0||tenderTotalCents>draftCents)&&<p className="ops-error">La suma de pagos y crédito registrado no puede superar el total.</p>}
+     {creditTenderCents>0&&<p className="ops-hint">Crédito del proveedor: {cash(creditTenderCents)}. Genera saldo por pagar al proveedor; no es un pago efectuado.</p>}
      <div className="ops-receipt-picker">
       <label className="ops-photo-label">📷 {evidence?evidence.name:"Foto del ticket (opcional)"}<input aria-label="Fotografía del ticket" type="file" accept="image/jpeg,image/png,image/webp,image/*" capture="environment" onChange={e=>setEvidence(e.target.files?.[0]??null)}/></label>
       <label className="ops-inline-check"><input type="checkbox" checked={receiptDeliveredAtPurchase} onChange={e=>setReceiptDeliveredAtPurchase(e.target.checked)}/> Ya entregué el comprobante</label>
      </div>
      <details className="ops-purchase-extra"><summary>Observaciones (opcional)</summary><label>Observaciones<textarea rows={2} placeholder="Comentarios de la compra" value={notes} onChange={e=>setNotes(e.target.value)}/></label></details>
-     <button className="ops-primary" disabled={busy||!supplierId||!Number.isFinite(draftBalance)||draftBalance<0||draftCents<1||tenders.some(p=>!p.amount.trim())} onClick={()=>void work(addPurchase)}>{busy?'Guardando…':'Guardar compra'}</button>
+     <button className="ops-primary" disabled={busy||!supplierId||!Number.isFinite(draftBalance)||draftBalance<0||tenderTotalCents>draftCents||draftCents<1||tenders.some(p=>!p.amount.trim())} onClick={()=>void work(addPurchase)}>{busy?'Guardando…':'Guardar compra'}</button>
     </section>
     {recentSaved&&<p role="status" className="ops-saved-notice">{recentSaved}</p>}
     <section className="ops-purchase-search">
@@ -484,7 +500,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
         <button disabled={busy} onClick={()=>void work(consultHistory)}>Consultar periodo</button>
         {historyLoaded&&<><p className="ops-hint">{matchedRows.length} compra(s) en el periodo seleccionado</p>
           <div className="ops-list">{matchedRows.map(p=><button key={p.id} className="ops-purchase" onClick={()=>{openPurchaseEdit(p);}}>
-            <span><strong>{p.supplierName}</strong><small>{p.purchaseDate}</small></span>
+            <span><strong>{p.supplierName}</strong><small>{p.folio??p.id.slice(0,12)} · {p.purchaseDate}</small></span>
             <span className="ops-purchase-amount"><strong>{cash(p.totalCents)}</strong><small>{p.cancelled?'Cancelada':status(p.goodsStatus)}</small></span>
           </button>)}</div>
           {editingPurchase&&active.purchases.filter(p=>p.id===editingPurchase).map(p=><section key={p.id} className="ops-inline-editor ops-purchase-editor">
