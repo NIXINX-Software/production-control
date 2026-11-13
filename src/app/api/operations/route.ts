@@ -2,6 +2,7 @@ import {NextRequest,NextResponse} from 'next/server';
 import {FieldValue,type Firestore} from 'firebase-admin/firestore';
 import {db,requireSameOrigin,requireSuperAdmin,text} from '@/lib/pc-server';
 import {csvExport} from '@/lib/pc-operational-files';
+import {nextOpsFolio} from '@/lib/ops-folio';
 import {
   OPS_UNITS,isOpsSite,measureOf,normalUnit,baseAmount,validMoneyCents,validDate as opsDate,
   isRecord,purchaseBalances,bankStatusForPayments,type OpsSite,type OpsPayment,type OpsSnapshot
@@ -96,15 +97,15 @@ export async function POST(req:NextRequest){
   if(action==='supplier.add'){
     const name=text(body.name,120);
     if(invalid(name))throw new Error('INVALID_SUPPLIER');
-    const id=docId(site);
-    await store.collection('ops_suppliers').doc(id).create({siteId:site,name,active:true,createdAt:now,updatedAt:now});
+    const id=docId(site),folio=await nextOpsFolio(store,site,'PRV');
+    await store.collection('ops_suppliers').doc(id).create({siteId:site,folio,name,active:true,createdAt:now,updatedAt:now});
     return NextResponse.json({ok:true,id});
   }
   if(action==='product.add'){
     const name=text(body.name,120),unit=body.unit;
     if(invalid(name)||!['kg','l','unit'].includes(String(unit)))throw new Error('INVALID_PRODUCT');
-    const id=docId(site);
-    await store.collection('ops_products').doc(id).create({siteId:site,name,unit,active:true,createdAt:now,updatedAt:now});
+    const id=docId(site),folio=await nextOpsFolio(store,site,'PM');
+    await store.collection('ops_products').doc(id).create({siteId:site,folio,name,unit,active:true,createdAt:now,updatedAt:now});
     return NextResponse.json({ok:true,id});
   }
   if(action==='product.update'||action==='product.deactivate'||action==='product.delete'){
@@ -137,8 +138,8 @@ export async function POST(req:NextRequest){
     const product=(await store.collection('ops_products').doc(productId).get()).data();
     if(!product||product.siteId!==site||product.active!==true||product.unit!==normalUnit(unit as typeof OPS_UNITS[number])||(!Number.isInteger(packCount)&&measureOf(unit as typeof OPS_UNITS[number])==='count'))throw new Error('INVALID_PRESENTATION');
     const unitAmount=baseAmount(packCount,unit as typeof OPS_UNITS[number]);
-    const id=docId(site);
-    await store.collection('ops_presentations').doc(id).create({siteId:site,productId,label,packCount,packUnit:unit,unitAmount,unit:product.unit,active:true,createdAt:now,updatedAt:now});
+    const id=docId(site),folio=await nextOpsFolio(store,site,'PRE');
+    await store.collection('ops_presentations').doc(id).create({siteId:site,folio,productId,label,packCount,packUnit:unit,unitAmount,unit:product.unit,active:true,createdAt:now,updatedAt:now});
     return NextResponse.json({ok:true,id});
   }
   if(action==='presentation.update'||action==='presentation.deactivate'||action==='presentation.delete'){
@@ -172,21 +173,28 @@ export async function POST(req:NextRequest){
       if(!isRecord(pay)||!['cash','debit_card','credit_card','credit_note','card','transfer','other'].includes(String(pay.method))||!validMoneyCents(pay.amountCents))throw new Error('INVALID_PAYMENTS');
       normalized.push({method:pay.method as OpsPayment['method'],amountCents:pay.amountCents,reference:text(pay.reference,100)});
     }
-    const {paidCents,balanceCents}=purchaseBalances(totalCents,normalized.map(p=>p.amountCents));
+    const creditNoteCents=normalized.filter(p=>p.method==='credit_note').reduce((sum,p)=>sum+p.amountCents,0);
+    const monetary=normalized.filter(p=>p.method!=='credit_note');
+    if(monetary.reduce((sum,p)=>sum+p.amountCents,0)+creditNoteCents>totalCents)throw new Error('PAYMENT_EXCEEDS_TOTAL');
+    const {paidCents,balanceCents}=purchaseBalances(totalCents,monetary.map(p=>p.amountCents));
     const dueDate=balanceCents>0&&termsDays!==null?new Date(Date.parse(date+'T12:00:00Z')+termsDays*86400000).toISOString().slice(0,10):null;
-    const id=docId(site),purchaseRef=store.collection('ops_purchases').doc(id),batch=store.batch();
-    batch.create(purchaseRef,{siteId:site,purchaseDate:date,supplierId,supplierName:supplier.name,totalCents,
+    const id=docId(site),folio=await nextOpsFolio(store,site,'CMP'),purchaseRef=store.collection('ops_purchases').doc(id),batch=store.batch();
+    const orderId=typeof body.orderId==='string'?text(body.orderId,140):'';
+    if(orderId){const o=(await store.collection('ops_orders').doc(orderId).get()).data();if(!o||o.siteId!==site||o.status!=='approved')throw new Error('INVALID_PURCHASE_ORDER_LINK');}
+    batch.create(purchaseRef,{siteId:site,folio,orderId:orderId||null,purchaseDate:date,supplierId,supplierName:supplier.name,totalCents,supplierCreditCents:creditNoteCents,
       currency:'CAD',paidCents,balanceCents,dueDate,goodsStatus:'pending',documentStatus:'missing',
-      bankStatus:bankStatusForPayments(normalized.map(p=>p.method)),receiptCount:0,documentCount:0,receiptDelivered:false,receiptAcknowledged:false,notes:text(body.notes,600),
+      bankStatus:bankStatusForPayments(monetary.map(p=>p.method)),receiptCount:0,documentCount:0,receiptDelivered:false,receiptAcknowledged:false,notes:text(body.notes,600),
       createdBy:actor,createdAt:now,updatedAt:now,contractVersion:'ops.purchases.v0.1'});
-    for(const pay of normalized){
+    for(const pay of monetary){
       const paymentRef=store.collection('ops_payments').doc(docId(site));
       batch.create(paymentRef,{siteId:site,purchaseId:id,amountCents:pay.amountCents,method:pay.method,reference:pay.reference,
         reconciliationStatus:['cash','credit_note'].includes(pay.method)?'not_applicable':'pending',paidDate:date,createdBy:actor,createdAt:now});
     }
-    batch.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId:id,action:'purchase.created',actor,createdAt:now});
+    if(creditNoteCents>0){const creditRef=store.collection('ops_supplier_credit_notes').doc(docId(site));
+      batch.create(creditRef,{siteId:site,supplierId,purchaseId:id,amountCents:creditNoteCents,notes:'Crédito comercial, no pago recibido',createdAt:now});}
+    batch.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId:id,folio,action:'purchase.created',actor,createdAt:now});
     await batch.commit();
-    return NextResponse.json({ok:true,id});
+    return NextResponse.json({ok:true,id,folio});
   }
   if(action==='purchase.update'||action==='purchase.cancel'){
     const id=text(body.purchaseId,130),ref=store.collection('ops_purchases').doc(id);
