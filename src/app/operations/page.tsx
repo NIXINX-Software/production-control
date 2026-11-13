@@ -5,6 +5,7 @@ import {onAuthStateChanged,signInWithEmailAndPassword,signOut,type User} from 'f
 import {auth} from '@/lib/firebase';
 import {baseAmount,bankStatusForPayments,EMPTY_OPS,normalUnit,purchaseBalances,purchaseSummary,
  type OpsSite,type OpsUnit,type OpsSnapshot,type OpsPurchase,type OpsPayment,type OpsPresentation} from '@/lib/ops-contract';
+import {SHOWROOM_ONLY} from '@/lib/ops-showroom-fixture';
 import './operations.css';
 
 type Panel='compras'|'recepcion'|'conciliacion'|'catalogos'|'kpis'|'showroom'|'datos';
@@ -16,32 +17,6 @@ const dateToday=()=>new Date().toLocaleDateString('en-CA',{timeZone:'America/Tor
 const cash=(cents:number)=>new Intl.NumberFormat('en-CA',{style:'currency',currency:'CAD'}).format(cents/100);
 const genId=(s:OpsSite)=>s+'_'+crypto.randomUUID();
 const uLabel:Record<OpsUnit,string>={kg:'kg',g:'g',lb:'lb',l:'L',ml:'mL',unit:'pzas',portion:'porciones'};
-const initial:OpsSnapshot={
- products:[
-  {id:'htl_feta',siteId:'htl',name:'Queso feta',unit:'kg',active:true},
-  {id:'htl_oil',siteId:'htl',name:'Aceite vegetal',unit:'l',active:true},
-  {id:'htw_feta',siteId:'htw',name:'Queso feta',unit:'kg',active:true},
- ],
- suppliers:[{id:'htl_charro',siteId:'htl',name:'El Charro',active:true},{id:'htl_costco',siteId:'htl',name:'Costco',active:true},
-  {id:'htw_costco',siteId:'htw',name:'Costco Windsor',active:true}],
- presentations:[
-  {id:'htl_feta_750',siteId:'htl',productId:'htl_feta',label:'Bolsa 750 g',packCount:750,packUnit:'g',unitAmount:0.75,unit:'kg',active:true},
-  {id:'htl_feta_1',siteId:'htl',productId:'htl_feta',label:'Bolsa 1 kg',packCount:1,packUnit:'kg',unitAmount:1,unit:'kg',active:true},
-  {id:'htl_feta_5',siteId:'htl',productId:'htl_feta',label:'Saco 5 kg',packCount:5,packUnit:'kg',unitAmount:5,unit:'kg',active:true},
-  {id:'htl_oil_1',siteId:'htl',productId:'htl_oil',label:'Botella 1 L',packCount:1,packUnit:'l',unitAmount:1,unit:'l',active:true},
-  {id:'htw_feta_1',siteId:'htw',productId:'htw_feta',label:'Bolsa 1 kg',packCount:1,packUnit:'kg',unitAmount:1,unit:'kg',active:true}
- ],
- purchases:[
-  {id:'htl_demo_credit',siteId:'htl',purchaseDate:'2026-11-13',supplierId:'htl_charro',supplierName:'El Charro',totalCents:50000,currency:'CAD',
-   paidCents:0,balanceCents:50000,dueDate:'2026-12-13',goodsStatus:'pending',documentStatus:'captured',bankStatus:'awaiting_payment',
-   receiptCount:0,documentCount:1,receiptDelivered:false,receiptAcknowledged:false,notes:'Ejemplo: línea de crédito a 30 días'},
-  {id:'htw_demo_cash',siteId:'htw',purchaseDate:'2026-11-13',supplierId:'htw_costco',supplierName:'Costco Windsor',totalCents:12950,currency:'CAD',
-   paidCents:12950,balanceCents:0,dueDate:null,goodsStatus:'received',documentStatus:'received',bankStatus:'not_applicable',
-   receiptCount:1,documentCount:1,receiptDelivered:true,receiptAcknowledged:true,notes:'Ejemplo: compra de contado'}
- ],
- payments:[{id:'htw_demo_pay',siteId:'htw',purchaseId:'htw_demo_cash',amountCents:12950,method:'cash',reconciliationStatus:'not_applicable',paidDate:'2026-11-13'}],
- receipts:[],documents:[{id:'htl_demo_document',siteId:'htl',purchaseId:'htl_demo_credit',storagePath:'demo-only',mime:'image/jpeg',size:100,createdAt:null}]
-};
 const tabs:{id:Panel;title:string}[]=[{id:'compras',title:'Compras'},{id:'recepcion',title:'Recepción'},{id:'conciliacion',title:'Conciliación'},{id:'catalogos',title:'Catálogos'},
  {id:'kpis',title:'KPIs'},{id:'showroom',title:'Showroom'},{id:'datos',title:'Datos / DWH'}];
 const filterSite=(data:OpsSnapshot,siteId:OpsSite):OpsSnapshot=>({
@@ -67,15 +42,10 @@ async function resizeEvidence(input:File):Promise<File>{
  if(blob.size>8*1024*1024)throw new Error('La imagen supera el límite de 8 MB.');
  return new File([blob],`comprobante-${Date.now()}.jpg`,{type:'image/jpeg'});
 }
-function csvDownload(filename:string,header:string[],rows:(string|number)[][]){
- const safe=(v:string|number)=>'"'+String(v).replace(/"/g,'""')+'"';
- const content='\ufeff'+[header,...rows].map(r=>r.map(safe).join(',')).join('\r\n');
- const obj=URL.createObjectURL(new Blob([content],{type:'text/csv;charset=utf-8'}));
- const a=document.createElement('a');a.href=obj;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(obj),1000);
-}
 export default function Operations(){
  const [tab,setTab]=useState<Panel>('compras'),[mode,setMode]=useState<ViewMode>('demo'),[site,setSite]=useState<OpsSite>('htl');
- const [scope,setScope]=useState<OpsSite[]>(['htl']),[data,setData]=useState<OpsSnapshot>(initial);
+ const [scope,setScope]=useState<OpsSite[]>(['htl']),[data,setData]=useState<OpsSnapshot>(EMPTY_OPS);
+ const [superadminVerified,setSuperadminVerified]=useState(false);
  const [user,setUser]=useState<User|null>(null),[email,setEmail]=useState(''),[password,setPassword]=useState('');
  const [busy,setBusy]=useState(false),[msg,setMsg]=useState(''),[selection,setSelection]=useState('htl_demo_credit');
  const [supplierId,setSupplierId]=useState('htl_charro'),[total,setTotal]=useState('500'),[purchaseDate,setPurchaseDate]=useState(dateToday());
@@ -122,14 +92,16 @@ export default function Operations(){
    if(!resp.ok||!result.data)throw new Error(id.toUpperCase()+': '+(result.error||String(resp.status)));
    return result.data;
   }));
+  setSuperadminVerified(false);
   setData({products:requests.flatMap(d=>d.products),suppliers:requests.flatMap(d=>d.suppliers),
     presentations:requests.flatMap(d=>d.presentations),purchases:requests.flatMap(d=>d.purchases),
     payments:requests.flatMap(d=>d.payments),receipts:requests.flatMap(d=>d.receipts),
     documents:requests.flatMap(d=>d.documents)});
+  setSuperadminVerified(true);
  }
  async function work(job:()=>Promise<void>){setBusy(true);setMsg('');try{await job();setMsg('Operación completada.');}
   catch(e){setMsg('No se completó: '+(e instanceof Error?e.message:String(e)));}finally{setBusy(false);}}
- function chooseSite(v:OpsSite){setSite(v);setScope([v]);setSelection('');setSupplierId('');setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');}
+ function chooseSite(v:OpsSite){setSite(v);setScope([v]);setSuperadminVerified(false);if(tab==='datos')setTab('compras');setSelection('');setSupplierId('');setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');}
  async function addSupplier(){
   if(newSupplier.trim().length<2)throw new Error('Escribe el nombre del proveedor.');
   if(mode==='live'){await request('supplier.add',{name:newSupplier});await refreshLive();}
@@ -260,16 +232,25 @@ export default function Operations(){
   else setChange(purchase.id,{documentStatus:next,receiptDelivered:next==='delivered'||next==='received',receiptAcknowledged:next==='received'});
   setRecipient('');
  }
+ async function downloadProtectedPurchases(){
+  if(!user||!superadminVerified||mode!=='live')throw new Error('Solo Superadmin autorizado puede exportar información.');
+  const token=await user.getIdToken();
+  const response=await fetch('/api/operations?site='+site+'&view=export',{headers:{Authorization:'Bearer '+token},cache:'no-store'});
+  if(!response.ok){const err=await response.json() as {error?:string};throw new Error(err.error||'La exportación fue denegada.');}
+  if(!response.headers.get('content-type')?.includes('text/csv'))throw new Error('El servidor no devolvió un archivo CSV válido.');
+  const blob=await response.blob();const url=URL.createObjectURL(blob);const link=document.createElement('a');
+  link.href=url;link.download='operations_'+site+'_purchases.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+ }
  async function login(){if(!auth)throw new Error('Firebase Auth no está configurado.');await signInWithEmailAndPassword(auth,email,password);setPassword('');}
  const demoMode=mode==='demo';
- const selectedRows=tab==='showroom'?initial.purchases:purchases;
+ const selectedRows=tab==='showroom'?SHOWROOM_ONLY.purchases:purchases;
  const showStats=purchaseSummary(selectedRows);
- const currentTitle=demoMode?'DEMOSTRACIÓN — NO GUARDA EN FIRESTORE':'OPERACIÓN CON AUTENTICACIÓN';
+ const currentTitle=demoMode?'DEMOSTRACIÓN EN MEMORIA · CATÁLOGOS VACÍOS':'OPERACIÓN CON AUTENTICACIÓN';
  return <div className="ops">
   <header className="ops-header"><div className="ops-header-inner">
    <div><Link href="/" className="ops-back">← Production Control</Link><h1>Business Transformation <span>· Operaciones</span></h1></div>
    <div className="ops-header-right"><span className="ops-status">{currentTitle}</span>
-    <select aria-label="Modo de información" value={mode} onChange={e=>{setMode(e.target.value as ViewMode);setData(e.target.value==='demo'?initial:EMPTY_OPS);setMsg('');}}>
+    <select aria-label="Modo de información" value={mode} onChange={e=>{setMode(e.target.value as ViewMode);setData(EMPTY_OPS);setSuperadminVerified(false);setTab('compras');setMsg('');}}>
       <option value="demo">Demo segura</option><option value="live">Firestore autorizado</option></select>
    </div>
   </div></header>
@@ -281,14 +262,14 @@ export default function Operations(){
     <div className="ops-toolbar-note">El producto maestro, los proveedores y cada compra pertenecen a una sola empresa.</div>
    </div>
    {!demoMode&&<div className="ops-auth">
-     {user?<div className="ops-flex"><span>Sesión: {user.email}</span><button onClick={()=>void work(()=>refreshLive())} disabled={busy}>Consultar empresas seleccionadas</button><button onClick={()=>void signOut(auth!)}>Salir</button></div>:
+     {user?<div className="ops-flex"><span>Sesión: {user.email}</span><button onClick={()=>void work(()=>refreshLive())} disabled={busy}>Consultar empresas seleccionadas</button><button onClick={()=>{setSuperadminVerified(false);setData(EMPTY_OPS);setTab('compras');void signOut(auth!);}}>Salir</button></div>:
       <div className="ops-auth-form"><strong>Acceso administrativo</strong><input aria-label="Correo" placeholder="Correo electrónico" type="email" value={email} onChange={e=>setEmail(e.target.value)}/>
        <input aria-label="Contraseña" placeholder="Contraseña" type="password" value={password} onChange={e=>setPassword(e.target.value)}/>
        <button disabled={busy||!email||!password} onClick={()=>void work(login)}>Iniciar sesión</button></div>}
      <p className="ops-hint">Para operaciones reales, el servidor exige <code>portal_users.opsSiteIds</code> y un proyecto Firebase autorizado. Preview nunca escribe en el Firestore productivo.</p>
    </div>}
    {msg&&<div className="ops-feedback" role="status">{msg}<button onClick={()=>setMsg('')}>×</button></div>}
-   <nav className="ops-tabs" aria-label="NIXINX Operations">{tabs.map(t=><button key={t.id} className={tab===t.id?'active':''} onClick={()=>setTab(t.id)}>{t.title}</button>)}</nav>
+   <nav className="ops-tabs" aria-label="Operaciones">{tabs.filter(t=>t.id!=='datos'||(!demoMode&&user&&superadminVerified)).map(t=><button key={t.id} className={tab===t.id?'active':''} onClick={()=>setTab(t.id)}>{t.title}</button>)}</nav>
    {tab==='compras'&&<div className="ops-layout">
     <section className="ops-card ops-purchase-form">
      <h2>Nueva compra</h2><p className="ops-hint">Registra el proveedor, importe, cómo se pagó y fotografía el ticket. El detalle de artículos se captura en Recepción.</p>
@@ -449,7 +430,7 @@ export default function Operations(){
    </div>}
    {(tab==='kpis'||tab==='showroom')&&<section className="ops-card">
      <div className="ops-section-title"><h2>{tab==='showroom'?'Showroom · datos sintéticos':'KPIs de Compras y Recepción'}</h2>
-     <span className="ops-caption">{tab==='showroom'?'Ejemplo ilustrativo; no muestra clientes reales':(demoMode?'Datos demostrativos':'Datos de Firestore autorizado')}</span></div>
+     <span className="ops-caption">{tab==='showroom'?'Ejemplo ilustrativo; no muestra clientes reales':(demoMode?'Solo datos creados durante esta sesión':'Datos autorizados de Firestore')}</span></div>
      <div className="ops-metrics"><div><small>Compras</small><strong>{showStats.count}</strong></div>
       <div><small>Monto comprado</small><strong>{cash(showStats.totalCents)}</strong></div>
       <div><small>Saldo por pagar</small><strong>{cash(showStats.balanceCents)}</strong></div>
@@ -462,17 +443,13 @@ export default function Operations(){
      </div>)}</div>
      <p className="ops-hint">Los porcentajes y montos agregados se calculan únicamente sobre las empresas seleccionadas y autorizadas. No representan inventario de recetas.</p>
     </section>}
-   {tab==='datos'&&<section className="ops-card">
-    <h2>Proveedor interno para el Data Warehouse</h2><p className="ops-hint">Dominio candidato: Procesos · proveedor Software Propio · contrato v0.1. Exportación CSV de inspección, NO conector incremental certificado.</p>
-    <div className="ops-grid-2">
-     {['ops_purchases','ops_payments','ops_suppliers','ops_products','ops_presentations','ops_receipts','ops_documents','ops_audit'].map(x=>
-      <div className="ops-table-name" key={x}><code>{x}</code></div>)}
-    </div>
-    <button className="ops-primary" onClick={()=>csvDownload('nixinx-ops-purchases-sample.csv',
-     ['site_id','purchase_id','purchase_date','supplier_id','total_cents','paid_cents','balance_cents','goods_status','document_status','bank_status'],
-     purchases.map(p=>[p.siteId,p.id,p.purchaseDate,p.supplierId,p.totalCents,p.paidCents,p.balanceCents,p.goodsStatus,p.documentStatus,p.bankStatus]))}>
-     Exportar compras seleccionadas (CSV)</button>
-    <p className="ops-hint">La integración RAW → CORE → MART requerirá contrato canónico, marcas de actualización, cambios, reversiones y validación formal antes del Go Live.</p>
+   {tab==='datos'&&!demoMode&&superadminVerified&&user&&<section className="ops-card">
+    <h2>Exportación para Data Warehouse · Superadmin</h2>
+    <p className="ops-hint">Acceso exclusivo de superadministración; el servidor vuelve a comprobar identidad, rol activo y autorización para esta empresa en cada solicitud. No hay exportaciones de otras empresas ni datos sintéticos.</p>
+    <div className="ops-grid-2">{['ops_purchases','ops_payments','ops_suppliers','ops_products','ops_presentations','ops_receipts','ops_documents','ops_audit'].map(x=>
+      <div className="ops-table-name" key={x}><code>{x}</code></div>)}</div>
+    <button className="ops-primary" disabled={busy} onClick={()=>void work(downloadProtectedPurchases)}>Descargar compras de {site.toUpperCase()} (CSV autorizado)</button>
+    <p className="ops-hint">La exportación corresponde únicamente a la empresa seleccionada. Las tablas y el contrato incremental para RAW → CORE → MART aún requieren certificación del dominio Procesos.</p>
    </section>}
    {tab==='kpis'&&<section className="ops-card"><h3>Alcance del reporte</h3>
     <div className="ops-scope">{SITES.map(s=><label key={s.id}><input type="checkbox" checked={scope.includes(s.id)} onChange={e=>setScope(curr=>e.target.checked?[...curr,s.id]:curr.filter(x=>x!==s.id))}/>{s.name}</label>)}</div>
