@@ -67,7 +67,7 @@ function parseLine(value:unknown,siteProducts:Map<string,{name:string;unit:'kg'|
  const avg=row?.avgCostCents??null;
  const estimated=avg===null?null:Math.round(base*avg);
  return {id:crypto.randomUUID(),productId,productName:p.name,unit,quantity,requestedBaseAmount:base,
-  unitCostCents:avg,estimateCents:estimated,suppliedBaseAmount:0,supplyStatus:'pending'};
+  unitCostCents:avg,estimateCents:estimated,suppliedBaseAmount:0,supplyStatus:'pending',requestedCents:validMoneyCents(Number(value.requestedCents))?Number(value.requestedCents):estimated??0,lineApprovals:{},ownerAccepted:false,ownerLineComment:''};
 }
 export async function GET(req:NextRequest){
  try{
@@ -96,6 +96,8 @@ export async function POST(req:NextRequest){
   const database=store();
   if(action==='order.create'||action==='order.revise'){
    const from=String(body.from??''),to=String(body.to??'');
+   const requiredDate=String(body.requiredDate??'');
+   if(!validDate(requiredDate))throw new Error('INVALID_REQUIRED_DATE');
    const list=body.lines;
    if(!Array.isArray(list)||list.length<1||list.length>100)throw new Error('INVALID_ORDER_LINES');
    const [products,report]=await Promise.all([
@@ -109,10 +111,12 @@ export async function POST(req:NextRequest){
    if(!validMoneyCents(requestedBudgetCents)||!Number.isFinite(minPercent)||!Number.isFinite(maxPercent)||
        minPercent<0||minPercent>100||maxPercent<100||maxPercent>300||minPercent>maxPercent)throw new Error('INVALID_ORDER_BUDGET');
    const subtotal=orderEstimate(lines);
+   const requestedLinesTotal=lines.reduce((sum,line)=>sum+(line.requestedCents??0),0);
+   if(requestedLinesTotal!==requestedBudgetCents)throw new Error('ORDER_LINE_BUDGET_MISMATCH');
    const limits=effectiveBudgetRange(requestedBudgetCents,minPercent,maxPercent);
    if(action==='order.create'){
     const folio=await nextOpsFolio(database,site,'OC'),ref=database.collection('ops_orders').doc(id(site));
-    await ref.create({siteId:site,folio,status:'draft',revision:1,from,to,lines,
+    await ref.create({siteId:site,folio,status:'draft',revision:1,from,to,requiredDate,lines,
      estimatedSubtotalCents:subtotal,requestedBudgetCents,minPercent,maxPercent,...limits,
      approvals:{},createdBy:actor,createdAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()});
     await recordEvent(site,ref.id,'created',actor);
@@ -123,7 +127,7 @@ export async function POST(req:NextRequest){
     const existing=(await tx.get(ref)).data() as OpsOrder|undefined;
     if(!existing||existing.siteId!==site)throw new Error('ORDER_NOT_FOUND');
     if(!['draft','returned'].includes(existing.status))throw new Error('INVALID_STATE');
-    tx.update(ref,{from,to,lines,estimatedSubtotalCents:subtotal,requestedBudgetCents,
+    tx.update(ref,{from,to,requiredDate,lines,estimatedSubtotalCents:subtotal,requestedBudgetCents,
      minPercent,maxPercent,...limits,approvals:{},revision:FieldValue.increment(1),
      status:'draft',ownerComment:'',updatedAt:FieldValue.serverTimestamp()});
    });
@@ -132,6 +136,32 @@ export async function POST(req:NextRequest){
   }
   const orderId=text(body.orderId,140);
   const ref=database.collection('ops_orders').doc(orderId);
+  if(action==='order.line.approval'||action==='order.line.owner'||action==='order.line.comment'){
+   const lineId=text(body.lineId,140);
+   const role=body.role as OpsApprovalArea;
+   if(action==='order.line.approval'&&(!OPS_APPROVAL_AREAS.includes(role)||actor.length<2))throw new Error('INVALID_APPROVAL');
+   const ownerIdentity=action==='order.line.owner'?await requireSuperAdmin(req):null;
+   const nextAccepted=body.accepted===true;
+   const note=text(body.comment,1000);
+   await database.runTransaction(async tx=>{
+    const doc=(await tx.get(ref)).data() as OpsOrder|undefined;
+    if(!doc||doc.siteId!==site)throw new Error('ORDER_NOT_FOUND');
+    if(!['draft','returned'].includes(doc.status))throw new Error('INVALID_STATE');
+    const target=doc.lines.find(line=>line.id===lineId);
+    if(!target)throw new Error('ORDER_LINE_NOT_FOUND');
+    if(action==='order.line.owner'&&nextAccepted&&!OPS_APPROVAL_AREAS.every(a=>target.lineApprovals?.[a]?.revision===doc.revision))throw new Error('LINE_APPROVALS_REQUIRED');
+    const lines=doc.lines.map(line=>{
+     if(line.id!==lineId)return line;
+     if(action==='order.line.approval')return {...line,lineApprovals:{...line.lineApprovals,[role]:{name:actor,at:ISO(),revision:doc.revision}},ownerAccepted:false};
+     if(action==='order.line.owner')return {...line,ownerAccepted:nextAccepted,ownerLineComment:note};
+     return {...line,ownerLineComment:note};
+    });
+    const fullyApproved=lines.length>0&&lines.every(line=>line.ownerAccepted&&OPS_APPROVAL_AREAS.every(a=>line.lineApprovals?.[a]?.revision===doc.revision));
+    tx.update(ref,{lines,status:fullyApproved?'approved':'draft',...(fullyApproved?{ownerApprovedBy:ownerIdentity?.uid??doc.ownerApprovedBy,ownerApprovedAt:FieldValue.serverTimestamp()}:{}),updatedAt:FieldValue.serverTimestamp()});
+   });
+   await recordEvent(site,orderId,action,ownerIdentity?.uid??actor,lineId+(note?' | '+note:''));
+   return NextResponse.json({ok:true});
+  }
   if(action==='order.approval'){
    const role=body.role as OpsApprovalArea;
    if(!OPS_APPROVAL_AREAS.includes(role)||actor.length<2)throw new Error('INVALID_APPROVAL');
@@ -184,7 +214,7 @@ export async function POST(req:NextRequest){
     const found=doc.lines.find(x=>x.id===lineId);
     if(!found||suppliedBaseAmount>found.requestedBaseAmount+0.000001)throw new Error('SUPPLY_EXCEEDS_REQUEST');
     const lines=doc.lines.map(line=>line.id===lineId?{
-      ...line,suppliedBaseAmount,supplyStatus:supplyStatusFor(line.requestedBaseAmount,suppliedBaseAmount)
+      ...line,suppliedBaseAmount,supplyStatus:supplyStatusFor(line.requestedBaseAmount,suppliedBaseAmount),note:text(body.note,500)
     }:line);
     tx.update(ref,{lines,revision:FieldValue.increment(1),updatedAt:FieldValue.serverTimestamp()});
    });
