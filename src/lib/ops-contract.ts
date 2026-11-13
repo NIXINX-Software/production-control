@@ -1,3 +1,4 @@
+import {PC_UNITS} from './pc-units';
 /**
  * NIXINX Operations — first internal-process provider contract (candidate).
  * Independent from pc_products, pc_inputs, pc_counts and pc_movements.
@@ -6,8 +7,8 @@
 export const OPS_SITES = ['htl','htw','htft'] as const;
 export type OpsSite = typeof OPS_SITES[number];
 export const isOpsSite = (x:unknown):x is OpsSite => typeof x==='string' && OPS_SITES.some(s=>s===x);
-export const OPS_UNITS = ['kg','g','lb','l','ml','unit','portion'] as const;
-export type OpsUnit = typeof OPS_UNITS[number];
+export const OPS_UNITS = PC_UNITS.map(unit=>unit.id);
+export type OpsUnit = (typeof PC_UNITS)[number]['id'];
 export const OPS_MEASURE_TYPES = ['mass','volume','count'] as const;
 export type OpsMeasure = typeof OPS_MEASURE_TYPES[number];
 export function measureOf(unit:OpsUnit):OpsMeasure {
