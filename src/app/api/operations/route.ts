@@ -49,7 +49,23 @@ export async function GET(req:NextRequest){
  try{
   const {site,store}=await authorize(req,req.nextUrl.searchParams.get('site'));
   const view=req.nextUrl.searchParams.get('view');
-  if(view && view!=='export')throw new Error('INVALID_VIEW');
+  if(view && view!=='export' && view!=='history')throw new Error('INVALID_VIEW');
+  if(view==='history'){
+    const from=req.nextUrl.searchParams.get('from');
+    const to=req.nextUrl.searchParams.get('to');
+    if(!opsDate(from)||!opsDate(to)||from>to||Date.parse(to)-Date.parse(from)>366*86400000)throw new Error('INVALID_DATE_RANGE');
+    // Firestore composite index required: ops_purchases(siteId ASC, purchaseDate DESC).
+    // Query filters the company and selected dates on the server; no unbounded collection scan.
+    const purchases=await store.collection('ops_purchases')
+      .where('siteId','==',site).where('purchaseDate','>=',from).where('purchaseDate','<=',to)
+      .orderBy('purchaseDate','desc').limit(MAX_RESULTS+1).get();
+    const hasMore=purchases.size>MAX_RESULTS;
+    const rows=purchases.docs.slice(0,MAX_RESULTS).map(d=>({id:d.id,...d.data()}));
+    // Existing payment and receipt summaries remain on the parent purchase.
+    // Full statement evidence matching is not implemented: never manufacture reconciled=true.
+    return NextResponse.json({siteId:site,from,to,purchases:rows,hasMore,limit:MAX_RESULTS},
+      {headers:{'Cache-Control':'private,no-store'}});
+  }
   if(view==='export'){
     // Export never trusts front-end role checks: authorize() rechecks
     // Firebase ID token + superadmin email/role + explicit site grant.
