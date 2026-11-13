@@ -126,10 +126,22 @@ export async function POST(req:NextRequest){
       if(!p||p.siteId!==site||p.cancelled===true)throw new Error('INVALID_PURCHASE');
       if(amount>p.balanceCents)throw new Error('PAYMENT_EXCEEDS_TOTAL');
       tx.create(payment,{siteId:site,purchaseId:id,amountCents:amount,method,reconciliationStatus:method==='cash'?'not_applicable':'pending',paidDate:date,createdAt:now,createdBy:actor});
-      tx.update(ref,{paidCents:p.paidCents+amount,balanceCents:p.balanceCents-amount,bankStatus:method==='cash'?p.bankStatus:'pending_reconciliation',updatedAt:now});
+      tx.update(ref,{paidCents:p.paidCents+amount,balanceCents:p.balanceCents-amount,bankStatus:method==='cash'?(p.bankStatus==='awaiting_payment'?'not_applicable':p.bankStatus):'pending_reconciliation',updatedAt:now});
       tx.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId:id,action:'payment.registered',amountCents:amount,method,actor,createdAt:now});
     });
     return NextResponse.json({ok:true,id:payment.id});
+  }
+  if(action==='goods.verify'){
+    const id=text(body.purchaseId,130),verifier=text(body.verifier,120);
+    if(verifier.length<2)throw new Error('VERIFIER_REQUIRED');
+    const ref=store.collection('ops_purchases').doc(id);
+    await store.runTransaction(async tx=>{
+      const snapshot=await tx.get(ref),purchase=snapshot.data();
+      if(!purchase||purchase.siteId!==site||purchase.goodsStatus!=='received'||purchase.receiptCount<1)throw new Error('GOODS_NOT_READY_FOR_VERIFICATION');
+      tx.update(ref,{goodsStatus:'verified',goodsVerifiedBy:verifier,goodsVerifiedAt:now,updatedAt:now});
+      tx.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId:id,action:'goods.verified',verifier,actor,createdAt:now});
+    });
+    return NextResponse.json({ok:true});
   }
   if(action==='document.status'){
     const id=text(body.purchaseId,130),status=body.status,recipient=text(body.recipient,120);
@@ -138,7 +150,7 @@ export async function POST(req:NextRequest){
     await store.runTransaction(async tx=>{
       const doc=await tx.get(ref),p=doc.data();
       if(!p||p.siteId!==site||!['captured','delivered','received','rejected'].includes(p.documentStatus))throw new Error('INVALID_DOCUMENT_STATE');
-      if(status==='received'&&p.documentStatus!=='delivered'||status==='delivered'&&p.documentStatus==='missing')throw new Error('INVALID_DOCUMENT_STATE');
+      if((status==='received'||status==='rejected')&&p.documentStatus!=='delivered'||status==='delivered'&&!['captured','rejected'].includes(p.documentStatus))throw new Error('INVALID_DOCUMENT_STATE');
       tx.update(ref,{documentStatus:status,updatedAt:now});
       tx.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId:id,action:'document.'+status,recipient,actor,createdAt:now});
     });
