@@ -47,6 +47,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  const [scope,setScope]=useState<OpsSite[]>(['htl']),[data,setData]=useState<OpsSnapshot>(EMPTY_OPS);
  const [superadminVerified,setSuperadminVerified]=useState(false);
  const [workspaceAuthorized,setWorkspaceAuthorized]=useState(false),[workspaceError,setWorkspaceError]=useState('');
+ const [workspaceRole,setWorkspaceRole]=useState<string|null>(null);
  const [showroomAuthorized,setShowroomAuthorized]=useState(false),[showroomData,setShowroomData]=useState<OpsSnapshot|null>(null);
  const [user,setUser]=useState<User|null>(null),[email,setEmail]=useState(''),[password,setPassword]=useState('');
  const [busy,setBusy]=useState(false),[msg,setMsg]=useState(''),[selection,setSelection]=useState('');
@@ -104,9 +105,9 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
     const result=await response.json() as {role?:string;error?:string};
     if(!response.ok)throw new Error(result.error??'No autorizado');
     if(!(result.role==='admin'||(workspace==='compras'&&result.role==='ops_buyer')||(workspace==='control'&&result.role==='ops_backoffice')))throw new Error('Esta cuenta no tiene acceso a este espacio.');
-    return true;
-   }).then(()=>{if(active){setWorkspaceAuthorized(true);setWorkspaceError('');}})
-     .catch(e=>{if(active){setWorkspaceAuthorized(false);setWorkspaceError(e instanceof Error?e.message:'Acceso denegado');}});
+    return result.role;
+   }).then(role=>{if(active){setWorkspaceAuthorized(true);setWorkspaceRole(role??null);setWorkspaceError('');}})
+     .catch(e=>{if(active){setWorkspaceAuthorized(false);setWorkspaceRole(null);setWorkspaceError(e instanceof Error?e.message:'Acceso denegado');}});
    return ()=>{active=false;};
  },[workspace,user,site]);
  useEffect(()=>{
@@ -344,6 +345,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  const showStats=purchaseSummary(selectedRows);
  const currentTitle=demoMode?'DEMOSTRACIÓN EN MEMORIA · CATÁLOGOS VACÍOS':'OPERACIÓN CON AUTENTICACIÓN';
  const accessReady=workspace==='admin'?showroomAuthorized:workspaceAuthorized;
+ const canNavigate=workspace==='admin'||workspaceRole==='admin';
  if(!accessReady)return <main className="ops ops-wrap"><section className="ops-card" style={{maxWidth:480,margin:'64px auto'}}>
   <h1>{workspace==='admin'?'Administración general':workspace==='compras'?'Registro de compras':'Control de recepción y conciliación'}</h1>
   <p className="ops-hint">Acceso independiente por usuario, función y empresa. Solo Superadmin puede cambiar de área.</p>
@@ -355,7 +357,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  </section></main>;
  return <div className="ops">
   <header className="ops-header"><div className="ops-header-inner">
-   <div>{workspace==='admin'&&<nav className="ops-flex" aria-label="Navegación Superadmin"><Link href="/">Producción y Conteos</Link><Link href="/compras">Compras</Link><Link href="/control-operativo">Control operativo</Link></nav>}<h1>{workspace==='compras'?'Compras':workspace==='control'?'Recepción y conciliación':'Administración general'}</h1></div>
+   <div>{canNavigate&&<nav className="ops-flex" aria-label="Navegación Superadmin"><Link href="/">Producción y Conteos</Link><Link href="/compras">Compras</Link><Link href="/control-operativo">Control operativo</Link><Link href="/operations">Administración general</Link></nav>}<h1>{workspace==='compras'?'Compras':workspace==='control'?'Recepción y conciliación':'Administración general'}</h1></div>
    <div className="ops-header-right"><span className="ops-status">{currentTitle}</span>
     {workspace==='admin'&&<select aria-label="Modo de información" value={mode} onChange={e=>{setMode(e.target.value as ViewMode);setData(EMPTY_OPS);setSuperadminVerified(false);setTab('compras');setHistoryLoaded(false);setHistoryOpen(false);setRecentSaved('');setSelection('');setSupplierId('');setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');setMsg('');}}>
       <option value="demo">Demo segura</option><option value="live">Firestore autorizado</option></select>}
