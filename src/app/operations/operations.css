@@ -200,3 +200,40 @@
 .ops-catalog-actions button{font-size:12px;min-height:32px;padding:5px 9px;border:1px solid #cad9e6;border-radius:7px;background:#fff;color:#214866;cursor:pointer}
 .ops-catalog-actions button:disabled{opacity:.5;cursor:not-allowed}
 @media(max-width:600px){.ops-catalog-products>div{align-items:flex-start}.ops-catalog-actions{width:100%}.ops-catalog-actions button{flex:1}}
+
+/* Purchase orders, supplier ledger and master cost reporting (mobile-first, isolated). */
+.ops-module{display:grid;gap:12px;min-width:0}
+.ops-module>.ops-card{min-width:0}
+.ops-demo-note{padding:10px 13px;border-radius:10px;background:#fff3d9;color:#684c10;font-size:12px}
+.ops-order-card{padding:12px;margin:12px 0;border:1px solid #cbdbe7;background:#fafcfe;border-radius:12px}
+.ops-order-card>.ops-section-title{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.ops-order-card>.ops-section-title>span{font-size:11px;font-weight:650;padding:4px 8px;border-radius:8px;background:#e6f3fb}
+.ops-approval-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:10px 0}
+.ops-approval-grid button{font-size:12px;min-width:0;white-space:normal;padding:9px 7px}
+.ops-order-lines{display:grid;gap:7px;padding:8px 0}
+.ops-order-line{display:flex;justify-content:space-between;align-items:center;gap:9px;border-bottom:1px solid #e4edf3;padding:9px 0;min-width:0}
+.ops-order-line span{min-width:0;display:grid;gap:3px}
+.ops-order-line small{font-size:11px;color:#586d80}
+.ops-order-line button{flex-shrink:0;font-size:12px}
+.ops-supply-line{display:grid;gap:6px;margin:10px 0;padding:10px;border:1px solid #dbe7ef;border-radius:9px;background:white}
+.ops-supply-line small{color:#667687}
+.ops-supply-controls{display:grid;grid-template-columns:1fr auto auto;align-items:end;gap:6px}
+.ops-supply-controls>label{min-width:0}
+.ops-supply-controls input{max-width:100%;min-width:0}
+.ops-supply-controls button{min-height:38px;font-size:11px;padding:6px 8px}
+.ops-report-list{display:grid;gap:8px}
+.ops-report-row{display:grid;gap:3px;border:1px solid #e0e9ef;border-radius:9px;padding:11px 12px;min-width:0}
+.ops-report-row span{font-size:12px;color:#52677a}
+.ops-report-row b{font-size:13px}
+.ops-report-row small{font-size:11px;color:#9b4f29}
+.ops-order-history summary{font-weight:700;cursor:pointer}
+@media(max-width:600px){
+ .ops-module{gap:9px}
+ .ops-module>.ops-card{padding:12px!important}
+ .ops-order-card{padding:10px;margin:9px 0}
+ .ops-approval-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .ops-supply-controls{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+ .ops-supply-controls>label{grid-column:1/-1}
+ .ops-supply-controls button{min-width:0}
+ .ops-report-row{padding:9px 10px}
+}
