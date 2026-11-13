@@ -193,3 +193,10 @@
 @media(max-width:355px){
  .ops-purchase-form .ops-grid-2{grid-template-columns:1fr}
 }
+
+.ops-catalog-products{max-height:360px;overflow:auto;margin-top:10px}
+.ops-catalog-products>div{gap:10px;align-items:center;flex-wrap:wrap}
+.ops-catalog-actions{display:flex;gap:6px;flex-wrap:wrap}
+.ops-catalog-actions button{font-size:12px;min-height:32px;padding:5px 9px;border:1px solid #cad9e6;border-radius:7px;background:#fff;color:#214866;cursor:pointer}
+.ops-catalog-actions button:disabled{opacity:.5;cursor:not-allowed}
+@media(max-width:600px){.ops-catalog-products>div{align-items:flex-start}.ops-catalog-actions{width:100%}.ops-catalog-actions button{flex:1}}
