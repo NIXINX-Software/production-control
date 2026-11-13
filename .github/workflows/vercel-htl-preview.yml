@@ -1,0 +1,45 @@
+name: Hot Tacos - Production Control (manual preview)
+
+# No automatic preview; only explicit user-initiated runs.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-control-htl-preview
+  cancel-in-progress: false
+
+jobs:
+  deploy_htl:
+    name: preview Hot Tacos Production Control
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN_HOT_TACOS_PRODUCTION_CONTROL }}
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID_HOT_TACOS_PRODUCTION_CONTROL }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_HOT_TACOS_PRODUCTION_CONTROL }}
+    steps:
+      - name: Checkout NIXINX source
+        uses: actions/checkout@v4
+
+      - name: Verify Vercel destination
+        shell: bash
+        run: |
+          if [[ -z "$VERCEL_TOKEN" || -z "$VERCEL_ORG_ID" || -z "$VERCEL_PROJECT_ID" ]]; then
+            echo 'Missing HTL Production Control token, Team ID, or Project ID.' >&2
+            exit 1
+          fi
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Pull preview Vercel configuration
+        run: vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
+
+      - name: Build preview
+        run: vercel build --token="$VERCEL_TOKEN"
+
+      - name: Publish preview
+        run: vercel deploy --prebuilt --token="$VERCEL_TOKEN"
