@@ -9,7 +9,7 @@ import {SHOWROOM_ONLY} from '@/lib/ops-showroom-fixture';
 import './operations.css';
 
 type Panel='compras'|'recepcion'|'conciliacion'|'catalogos'|'kpis'|'showroom'|'datos';
-type Tender={id:string;method:OpsPayment['method'];amount:string;reference:string};
+type Tender={id:string;method:OpsPayment['method'];amount:string};
 const tenderMethods:{value:OpsPayment['method'];label:string}[]=[{value:'cash',label:'Efectivo'},{value:'debit_card',label:'Tarjeta de débito'},{value:'credit_card',label:'Tarjeta de crédito'},{value:'transfer',label:'Transferencia'},{value:'credit_note',label:'Nota de crédito del proveedor'},{value:'other',label:'Otro'}];
 type ViewMode='demo'|'live';
 const SITES:{id:OpsSite;name:string}[]=[{id:'htl',name:'Hot Tacos Leamington'},{id:'htw',name:'Hot Tacos Windsor'},{id:'htft',name:'Hot Tacos Food Truck'}];
@@ -48,15 +48,17 @@ export default function Operations(){
  const [superadminVerified,setSuperadminVerified]=useState(false);
  const [user,setUser]=useState<User|null>(null),[email,setEmail]=useState(''),[password,setPassword]=useState('');
  const [busy,setBusy]=useState(false),[msg,setMsg]=useState(''),[selection,setSelection]=useState('');
- const [supplierId,setSupplierId]=useState(''),[total,setTotal]=useState('500'),[purchaseDate,setPurchaseDate]=useState(dateToday());
+ const [supplierId,setSupplierId]=useState(''),[total,setTotal]=useState(''),[purchaseDate,setPurchaseDate]=useState(dateToday());
  const [terms,setTerms]=useState('30'),[tenders,setTenders]=useState<Tender[]>([]),[notes,setNotes]=useState('');
+ const [historyOpen,setHistoryOpen]=useState(false),[historyLoaded,setHistoryLoaded]=useState(false),[recentSaved,setRecentSaved]=useState('');
+ const [queryFrom,setQueryFrom]=useState(()=>{const d=new Date();d.setDate(d.getDate()-30);return d.toLocaleDateString('en-CA',{timeZone:'America/Toronto'});}),[queryTo,setQueryTo]=useState(dateToday());
  const [receiptDeliveredAtPurchase,setReceiptDeliveredAtPurchase]=useState(false),[inlineNewSupplier,setInlineNewSupplier]=useState(false),[inlineNewProduct,setInlineNewProduct]=useState(false),[inlineNewPresentation,setInlineNewPresentation]=useState(false);
  const [payAmount,setPayAmount]=useState(''),[payMethod,setPayMethod]=useState<OpsPayment['method']>('transfer');
  const [recipient,setRecipient]=useState(''),[evidence,setEvidence]=useState<File|null>(null),[existingEvidence,setExistingEvidence]=useState<File|null>(null);
  const [newSupplier,setNewSupplier]=useState(''),[newProduct,setNewProduct]=useState(''),[productUnit,setProductUnit]=useState<'kg'|'l'|'unit'>('kg');
  const [presentationProduct,setPresentationProduct]=useState(''),[newPresentationLabel,setNewPresentationLabel]=useState('');
- const [packCount,setPackCount]=useState('750'),[packUnit,setPackUnit]=useState<OpsUnit>('g');
- const [receivingProduct,setReceivingProduct]=useState(''),[receivingPresentation,setReceivingPresentation]=useState(''),[receivedPacks,setReceivedPacks]=useState('3'),[lineCost,setLineCost]=useState('');
+ const [packCount,setPackCount]=useState(''),[packUnit,setPackUnit]=useState<OpsUnit>('g');
+ const [receivingProduct,setReceivingProduct]=useState(''),[receivingPresentation,setReceivingPresentation]=useState(''),[receivedPacks,setReceivedPacks]=useState(''),[lineCost,setLineCost]=useState('');
  const [receptionState,setReceptionState]=useState<'partial'|'received'>('received');
  useEffect(()=>{if(!auth)return;return onAuthStateChanged(auth,setUser);},[]);
  useEffect(()=>{
@@ -80,15 +82,15 @@ export default function Operations(){
  },[mode,user,site]);
  const active=useMemo(()=>filterSite(data,site),[data,site]);
  const purchases=useMemo(()=>data.purchases.filter(p=>scope.includes(p.siteId)),[data,scope]);
- const selected=data.purchases.find(p=>p.id===selection&&p.siteId===site)??active.purchases[0];
+ const selected=data.purchases.find(p=>p.id===selection&&p.siteId===site);
  const supplier=active.suppliers.find(x=>x.id===supplierId);
  const presentationProductObj=active.products.find(x=>x.id===presentationProduct);
  const eligibleUnits=(['kg','g','lb','l','ml','unit','portion'] as OpsUnit[]).filter(u=>presentationProductObj&&normalUnit(u)===presentationProductObj.unit);
  const currentPresentation=active.presentations.find(x=>x.id===receivingPresentation&&x.productId===receivingProduct);
  const receivingProductObj=active.products.find(x=>x.id===receivingProduct);
  const receivingPresentations=active.presentations.filter(x=>x.productId===receivingProduct);
- const tenderTotalCents=tenders.reduce((sum,p)=>sum+Math.round(Number(p.amount||0)*100),0);
- const draftCents=Math.round(Number(total||0)*100);
+ const tenderTotalCents=tenders.reduce((sum,p)=>sum+(p.amount.trim()?Math.round(Number(p.amount.replace(',','.'))*100):0),0);
+ const draftCents=total.trim()?Math.round(Number(total.replace(',','.'))*100):0;
  const draftBalance=draftCents-tenderTotalCents;
  const associated=selected?data.payments.filter(p=>p.purchaseId===selected.id):[];
  const setChange=(purchaseId:string,patch:Partial<OpsPurchase>)=>setData(d=>({...d,purchases:d.purchases.map(p=>p.id===purchaseId?{...p,...patch}:p)}));
@@ -119,7 +121,7 @@ export default function Operations(){
  }
  async function work(job:()=>Promise<void>){setBusy(true);setMsg('');try{await job();setMsg('Operación completada.');}
   catch(e){setMsg('No se completó: '+(e instanceof Error?e.message:String(e)));}finally{setBusy(false);}}
- function chooseSite(v:OpsSite){setSite(v);setScope([v]);setSuperadminVerified(false);if(tab==='datos')setTab('compras');setSelection('');setSupplierId('');setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');}
+ function chooseSite(v:OpsSite){setSite(v);setScope([v]);setSuperadminVerified(false);if(tab==='datos')setTab('compras');setSelection('');setSupplierId('');setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');setHistoryLoaded(false);setHistoryOpen(false);setRecentSaved('');}
  async function addSupplier(){
   if(newSupplier.trim().length<2)throw new Error('Escribe el nombre del proveedor.');
   if(mode==='live'){const result=await request('supplier.add',{name:newSupplier});await refreshLive();if(result.id)setSupplierId(result.id);}
@@ -142,13 +144,13 @@ export default function Operations(){
   setNewPresentationLabel('');setInlineNewPresentation(false);
  }
  async function addPurchase(){
-  const cents=Math.round(Number(total)*100);
+  const cents=Math.round(Number(total.replace(',','.'))*100);
   if(!supplier||!Number.isSafeInteger(cents)||cents<1)throw new Error('Selecciona un proveedor y un importe válido.');
-  const payments:{method:OpsPayment['method'];amountCents:number;reference:string}[]=[];
+  const payments:{method:OpsPayment['method'];amountCents:number}[]=[];
   for(const p of tenders){
-   const amountCents=Math.round(Number(p.amount)*100);
+   const amountCents=Math.round(Number(p.amount.replace(',','.'))*100);
    if(!Number.isSafeInteger(amountCents)||amountCents<=0)throw new Error('Captura un importe válido en cada medio de pago.');
-   payments.push({method:p.method,amountCents,reference:p.reference.trim()});
+   payments.push({method:p.method,amountCents});
   }
   const b=purchaseBalances(cents,payments.map(p=>p.amountCents));
   const days=Number(terms);
@@ -173,12 +175,12 @@ export default function Operations(){
      bankStatus:bankStatusForPayments(payments.map(p=>p.method)),receiptCount:0,documentCount:evidence?1:0,
      receiptDelivered:receiptDeliveredAtPurchase,receiptAcknowledged:false,notes};
    const rows:OpsPayment[]=payments.map(p=>({id:genId(site),siteId:site,purchaseId:id,amountCents:p.amountCents,method:p.method,
-     reference:p.reference,reconciliationStatus:['cash','credit_note'].includes(p.method)?'not_applicable':'pending',paidDate:purchaseDate}));
+     reconciliationStatus:['cash','credit_note'].includes(p.method)?'not_applicable':'pending',paidDate:purchaseDate}));
    setData(d=>({...d,purchases:[row,...d.purchases],payments:[...d.payments,...rows],
      documents:evidence?[...d.documents,{id:genId(site),siteId:site,purchaseId:id,storagePath:'demo:image-resized-locally',mime:'image/jpeg',size:evidence.size}]:d.documents}));
    setSelection(id);
   }
-  setNotes('');setTenders([]);setEvidence(null);setReceiptDeliveredAtPurchase(false);
+  setNotes('');setTotal('');setTenders([]);setEvidence(null);setReceiptDeliveredAtPurchase(false);setRecentSaved('Compra registrada. Podrás encontrarla desde una consulta por fechas.');
  }
  async function addPayment(){
   if(!selected)throw new Error('Selecciona una compra.');
@@ -268,7 +270,7 @@ export default function Operations(){
   <header className="ops-header"><div className="ops-header-inner">
    <div><Link href="/" className="ops-back">← Production Control</Link><h1>Business Transformation <span>· Operaciones</span></h1></div>
    <div className="ops-header-right"><span className="ops-status">{currentTitle}</span>
-    <select aria-label="Modo de información" value={mode} onChange={e=>{setMode(e.target.value as ViewMode);setData(EMPTY_OPS);setSuperadminVerified(false);setTab('compras');setSelection('');setSupplierId('');setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');setMsg('');}}>
+    <select aria-label="Modo de información" value={mode} onChange={e=>{setMode(e.target.value as ViewMode);setData(EMPTY_OPS);setSuperadminVerified(false);setTab('compras');setHistoryLoaded(false);setHistoryOpen(false);setRecentSaved('');setSelection('');setSupplierId('');setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');setMsg('');}}>
       <option value="demo">Demo segura</option><option value="live">Firestore autorizado</option></select>
    </div>
   </div></header>
