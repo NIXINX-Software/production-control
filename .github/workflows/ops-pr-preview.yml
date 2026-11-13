@@ -1,7 +1,7 @@
 name: Hot Tacos - Operations (feature preview)
 on:
   push:
-    branches: ['feat/ops-*']
+    branches: ['feat/ops-*', 'feat/workspace-*']
 permissions:
   contents: read
 concurrency:
@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   deploy_preview:
-    if: startsWith(github.ref_name, 'feat/ops-')
+    if: startsWith(github.ref_name, 'feat/ops-') || startsWith(github.ref_name, 'feat/workspace-')
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
@@ -35,7 +35,7 @@ jobs:
           echo "VERCEL_PREVIEW_URL=$URL" >> "$GITHUB_ENV"
           echo "### NIXINX Operations Preview" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Preview: $URL/operations" >> "$GITHUB_STEP_SUMMARY"
+          echo "Preview: $URL/compras (Compras), $URL/control-operativo (Control), $URL/operations (Superadmin)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "No production deploy. Operations writes require independent sandbox credentials." >> "$GITHUB_STEP_SUMMARY"
           echo "PREVIEW_URL=$URL/operations"

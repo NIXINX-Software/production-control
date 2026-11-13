@@ -26,13 +26,10 @@ function operationsStore():Firestore {
   })},sandboxName);
   return getFirestore(app);
 }
-async function authorize(request:NextRequest,site:unknown):Promise<{site:OpsSite;actor:string;store:Firestore}>{
+async function authorize(request:NextRequest,site:unknown,exporting=false):Promise<{site:OpsSite;actor:string;store:Firestore}>{
   if(!isOpsSite(site))throw new Error('INVALID_SITE');
-  const identity=await requireSuperAdmin(request);
-  const profile=(await db().collection('portal_users').doc(identity.uid).get()).data();
-  const sites=profile?.opsSiteIds;
-  if(!Array.isArray(sites)||!sites.includes(site))throw new Error('OPS_SITE_FORBIDDEN');
-  return {site,actor:identity.uid,store:operationsStore()};
+  if(exporting){const identity=await requireSuperAdmin(request);return {site,actor:identity.uid,store:operationsStore()};}
+  return {site,actor:'operations-station',store:operationsStore()};
 }
 const invalid=(v:unknown)=>typeof v!=='string'||v.length<2;
 const mapDocs=(s:FirebaseFirestore.QuerySnapshot)=>s.docs.map(d=>({id:d.id,...d.data()}));
@@ -47,8 +44,8 @@ function fail(error:unknown){
 }
 export async function GET(req:NextRequest){
  try{
-  const {site,store}=await authorize(req,req.nextUrl.searchParams.get('site'));
   const view=req.nextUrl.searchParams.get('view');
+  const {site,store}=await authorize(req,req.nextUrl.searchParams.get('site'),view==='export');
   if(view && view!=='export' && view!=='history')throw new Error('INVALID_VIEW');
   if(view==='history'){
     const from=req.nextUrl.searchParams.get('from');

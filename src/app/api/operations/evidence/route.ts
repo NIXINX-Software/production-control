@@ -3,7 +3,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {getApps,initializeApp,cert,type App} from 'firebase-admin/app';
 import {getFirestore,FieldValue} from 'firebase-admin/firestore';
 import {getStorage} from 'firebase-admin/storage';
-import {db,requireSuperAdmin,requireSameOrigin,text} from '@/lib/pc-server';
+import {db,requireSameOrigin,text} from '@/lib/pc-server';
 import {isOpsSite,type OpsSite} from '@/lib/ops-contract';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
@@ -22,19 +22,16 @@ function sourceApp():App{
   credential:cert({projectId:project,clientEmail:creds.client_email,privateKey:creds.private_key.replace(/\\n/g,'\n')})
  },'nixinx-operations-sandbox');
 }
-async function authorized(req:NextRequest,site:unknown){
+async function authorized(_req:NextRequest,site:unknown,_purpose:'read'|'upload'='read'){
  if(!isOpsSite(site))throw new Error('INVALID_SITE');
- const user=await requireSuperAdmin(req);
- const profile=(await db().collection('portal_users').doc(user.uid).get()).data();
- if(!Array.isArray(profile?.opsSiteIds)||!profile.opsSiteIds.includes(site))throw new Error('OPS_SITE_FORBIDDEN');
  const app=sourceApp(),store=getFirestore(app);
  const bucketName=process.env.VERCEL_ENV==='production'?process.env.OPS_EVIDENCE_BUCKET:process.env.OPS_SANDBOX_STORAGE_BUCKET;
  if(!bucketName)throw new Error('OPS_EVIDENCE_BUCKET_NOT_CONFIGURED');
- return {site:site as OpsSite,actor:user.uid,store,bucket:getStorage(app).bucket(bucketName)};
+ return {site:site as OpsSite,actor:'operations-station',store,bucket:getStorage(app).bucket(bucketName)};
 }
 function problem(e:unknown){
  const message=e instanceof Error?e.message:'UPLOAD_ERROR';
- const status=message==='ADMIN_AUTH_REQUIRED'?401:message==='OPS_SITE_FORBIDDEN'||message==='SUPERADMIN_REQUIRED'||message==='ADMIN_ROLE_REQUIRED'?403:message.endsWith('NOT_CONFIGURED')||message==='OPS_RELEASE_DISABLED'?503:400;
+ const status=message==='ADMIN_AUTH_REQUIRED'?401:message==='OPS_SITE_FORBIDDEN'||message==='WORKSPACE_SITE_FORBIDDEN'||message==='WORKSPACE_FORBIDDEN'||message==='SUPERADMIN_REQUIRED'||message==='ADMIN_ROLE_REQUIRED'?403:message.endsWith('NOT_CONFIGURED')||message==='OPS_RELEASE_DISABLED'?503:400;
  return NextResponse.json({error:message},{status,headers:{'Cache-Control':'no-store'}});
 }
 function isImage(b:Buffer,mime:string){
@@ -47,7 +44,7 @@ export async function POST(req:NextRequest){
  try{
   requireSameOrigin(req);
   const form=await req.formData();
-  const {site,actor,store,bucket}=await authorized(req,form.get('siteId'));
+  const {site,actor,store,bucket}=await authorized(req,form.get('siteId'),'upload');
   const purchaseId=text(form.get('purchaseId'),130);
   const purchase=(await store.collection('ops_purchases').doc(purchaseId).get()).data();
   if(!purchase||purchase.siteId!==site)throw new Error('INVALID_PURCHASE');

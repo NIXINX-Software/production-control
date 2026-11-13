@@ -154,3 +154,42 @@
 @media(max-width:600px){
  .ops-receive-amount-row>label>input{margin-top:0}
 }
+
+/* Mobile-first quick purchase: one compact primary form, extras on demand. */
+.ops-purchase-extra{border-top:1px solid #e1ebf1;padding-top:7px}
+.ops-purchase-extra summary{font-size:12px;color:#375e78;cursor:pointer;font-weight:650}
+.ops-purchase-extra>label{margin-top:9px}
+.ops-photo-label{position:relative;display:flex!important;align-items:center;justify-content:center;gap:6px;min-height:42px;padding:8px 11px!important;font-size:12px;line-height:1.3}
+.ops-photo-label input[type=file]{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;margin:0!important}
+.ops-purchase-form .ops-receipt-picker{padding:8px 10px;gap:6px}
+.ops-purchase-form .ops-inline-check{font-size:12px}
+.ops-purchase-form .ops-quick-add{margin-top:-7px;text-align:right}
+.ops-purchase-form .ops-quick-add button{min-height:28px;font-size:11px;padding:4px 8px}
+@media(max-width:600px){
+ .ops-wrap{padding:7px 10px 32px}
+ .ops-header-inner{padding:9px 12px;gap:4px}
+ .ops-header h1{font-size:20px}
+ .ops-toolbar{margin-bottom:4px}
+ .ops-toolbar label{font-size:11px}
+ .ops-toolbar select{min-height:38px}
+ .ops-tabs{margin:3px 0 8px;padding:0 0 4px}
+ .ops-tabs button{min-height:34px;padding:5px 10px;font-size:13px}
+ .ops-capture-layout{gap:8px}
+ .ops-purchase-form{padding:12px!important;gap:8px!important;border-radius:12px}
+ .ops-purchase-form h2{font-size:18px}
+ .ops-purchase-form label{font-size:11px}
+ .ops-purchase-form input:not([type=checkbox]):not([type=file]),.ops-purchase-form select{height:39px!important;min-height:39px!important;padding:7px 10px}
+ .ops-purchase-form .ops-grid-2{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}
+ .ops-purchase-form .ops-payments-title button{min-height:31px;padding:5px 8px}
+ .ops-purchase-form .ops-payment-summary-compact{padding:7px 10px;gap:0}
+ .ops-purchase-form .ops-payment-summary-compact>div{font-size:12px;padding:1px 0}
+ .ops-purchase-form .ops-payment-summary-compact>div.ops-remaining{padding-top:4px;margin-top:2px}
+ .ops-purchase-form .ops-primary{min-height:42px}
+ .ops-purchase-form .ops-inline-check{min-height:28px!important}
+ .ops-purchase-form .ops-hint{font-size:11px;line-height:1.3}
+ .ops-purchase-search .ops-search-toggle{min-height:37px;padding:9px 13px;font-size:12px}
+ .ops-footer{padding-top:12px}
+}
+@media(max-width:355px){
+ .ops-purchase-form .ops-grid-2{grid-template-columns:1fr}
+}
