@@ -4,11 +4,13 @@ import Link from 'next/link';
 import {onAuthStateChanged,signInWithEmailAndPassword,signOut,type User} from 'firebase/auth';
 import {auth} from '@/lib/firebase';
 import {PC_UNITS} from '@/lib/pc-units';
+import OrderWorkspace from './order-workspace';
+import type {OpsOrder} from '@/lib/ops-order-contract';
 import {baseAmount,bankStatusForPayments,EMPTY_OPS,normalUnit,purchaseBalances,purchaseSummary,
  type OpsSite,type OpsUnit,type OpsSnapshot,type OpsPurchase,type OpsPayment,type OpsPresentation} from '@/lib/ops-contract';
 import './operations.css';
 
-type Panel='compras'|'recepcion'|'conciliacion'|'catalogos'|'kpis'|'showroom'|'datos';
+type Panel='compras'|'ordenes'|'recepcion'|'conciliacion'|'catalogos'|'kpis'|'planeacion'|'costos'|'proveedores'|'showroom'|'datos';
 type Workspace='admin'|'compras'|'control';
 type Tender={id:string;method:OpsPayment['method'];amount:string};
 const tenderMethods:{value:OpsPayment['method'];label:string}[]=[{value:'cash',label:'Efectivo'},{value:'debit_card',label:'Tarjeta de débito'},{value:'credit_card',label:'Tarjeta de crédito'},{value:'transfer',label:'Transferencia'},{value:'credit_note',label:'Nota de crédito del proveedor'},{value:'other',label:'Otro'}];
@@ -18,7 +20,7 @@ const dateToday=()=>new Date().toLocaleDateString('en-CA',{timeZone:'America/Tor
 const cash=(cents:number)=>new Intl.NumberFormat('en-CA',{style:'currency',currency:'CAD'}).format(cents/100);
 const genId=(s:OpsSite)=>s+'_'+crypto.randomUUID();
 const uLabel:Record<OpsUnit,string>=Object.fromEntries(PC_UNITS.map(u=>[u.id,u.es])) as Record<OpsUnit,string>;
-const tabs:{id:Panel;title:string}[]=[{id:'compras',title:'Compras'},{id:'recepcion',title:'Recepción'},{id:'conciliacion',title:'Conciliación'},{id:'catalogos',title:'Catálogos'},
+const tabs:{id:Panel;title:string}[]=[{id:'compras',title:'Compras'},{id:'ordenes',title:'Órdenes vigentes'},{id:'recepcion',title:'Recepción'},{id:'conciliacion',title:'Conciliación'},{id:'proveedores',title:'Cuentas por proveedor'},{id:'planeacion',title:'Planeación y autorizaciones'},{id:'costos',title:'Reporte costos'},{id:'catalogos',title:'Catálogos'},
  {id:'kpis',title:'KPIs'},{id:'showroom',title:'Showroom'},{id:'datos',title:'Datos / DWH'}];
 const filterSite=(data:OpsSnapshot,siteId:OpsSite):OpsSnapshot=>({
  products:data.products.filter(x=>x.siteId===siteId),suppliers:data.suppliers.filter(x=>x.siteId===siteId),
@@ -53,6 +55,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  const [user,setUser]=useState<User|null>(null),[email,setEmail]=useState(''),[password,setPassword]=useState('');
  const [busy,setBusy]=useState(false),[msg,setMsg]=useState(''),[selection,setSelection]=useState('');
  const [supplierId,setSupplierId]=useState(''),[total,setTotal]=useState(''),[purchaseDate,setPurchaseDate]=useState(dateToday());
+ const [purchaseOrderId,setPurchaseOrderId]=useState(''),[purchaseOrderOptions,setPurchaseOrderOptions]=useState<OpsOrder[]>([]);
  const [editingPurchase,setEditingPurchase]=useState(''),[editSupplier,setEditSupplier]=useState(''),[editDate,setEditDate]=useState(''),[editTotal,setEditTotal]=useState(''),[editNotes,setEditNotes]=useState('');
  const [terms,setTerms]=useState(''),[tenders,setTenders]=useState<Tender[]>([]),[notes,setNotes]=useState('');
  const [historyOpen,setHistoryOpen]=useState(false),[historyLoaded,setHistoryLoaded]=useState(false),[recentSaved,setRecentSaved]=useState('');
@@ -146,7 +149,9 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  const alreadyExists=active.products.find(p=>nameKey(p.name)===nameKey(newProduct)&&p.id!==editingProduct);
  const tenderTotalCents=tenders.reduce((sum,p)=>sum+(p.amount.trim()?Math.round(Number(p.amount.replace(',','.'))*100):0),0);
  const draftCents=total.trim()?Math.round(Number(total.replace(',','.'))*100):0;
- const draftBalance=draftCents-tenderTotalCents;
+ const creditTenderCents=tenders.filter(x=>x.method==='credit_note').reduce((v,x)=>v+Math.round(Number(x.amount.replace(',','.'))*100),0);
+ const monetaryTenderCents=tenders.filter(x=>x.method!=='credit_note').reduce((v,x)=>v+Math.round(Number(x.amount.replace(',','.'))*100),0);
+ const draftBalance=draftCents-monetaryTenderCents;
  const associated=selected?data.payments.filter(p=>p.purchaseId===selected.id):[];
  const setChange=(purchaseId:string,patch:Partial<OpsPurchase>)=>setData(d=>({...d,purchases:d.purchases.map(p=>p.id===purchaseId?{...p,...patch}:p)}));
  async function request(action:string,payload:Record<string,unknown>,siteId:OpsSite=site){
@@ -255,12 +260,13 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
    if(!Number.isSafeInteger(amountCents)||amountCents<=0)throw new Error('Captura un importe válido en cada medio de pago.');
    payments.push({method:p.method,amountCents});
   }
-  const b=purchaseBalances(cents,payments.map(p=>p.amountCents));
+  const b=purchaseBalances(cents,payments.filter(p=>p.method!=='credit_note').map(p=>p.amountCents));
+  if(payments.reduce((sum,p)=>sum+p.amountCents,0)>cents)throw new Error('Pagos y crédito anotado exceden la compra.');
   const days=terms.trim()?Number(terms):null;
   if(days!==null&&(!Number.isInteger(days)||days<1||days>365))throw new Error('El plazo de crédito debe ser de 1 a 365 días o dejarse en blanco.');
   if(receiptDeliveredAtPurchase&&!evidence)throw new Error('Adjunta el comprobante antes de marcarlo como entregado.');
   if(mode==='live'){
-   const result=await request('purchase.add',{supplierId:supplier.id,totalCents:cents,purchaseDate,termsDays:days,initialPayments:payments,notes});
+   const result=await request('purchase.add',{supplierId:supplier.id,totalCents:cents,purchaseDate,termsDays:days,initialPayments:payments,notes,orderId:purchaseOrderId||null});
    if(!result.id)throw new Error('La compra no devolvió identificador.');
    setSelection(result.id);
    await refreshLive();
@@ -274,16 +280,16 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
    const id=genId(site);
    const due=b.balanceCents&&days!==null?new Date(Date.parse(purchaseDate+'T12:00:00Z')+days*86400000).toISOString().slice(0,10):null;
    const row:OpsPurchase={id,siteId:site,purchaseDate,supplierId:supplier.id,supplierName:supplier.name,totalCents:cents,
-     currency:'CAD',...b,dueDate:due,goodsStatus:'pending',documentStatus:evidence?(receiptDeliveredAtPurchase?'delivered':'captured'):'missing',
+     currency:'CAD',...b,orderId:purchaseOrderId||null,supplierCreditCents:creditTenderCents,dueDate:due,goodsStatus:'pending',documentStatus:evidence?(receiptDeliveredAtPurchase?'delivered':'captured'):'missing',
      bankStatus:bankStatusForPayments(payments.map(p=>p.method)),receiptCount:0,documentCount:evidence?1:0,
      receiptDelivered:receiptDeliveredAtPurchase,receiptAcknowledged:false,notes};
-   const rows:OpsPayment[]=payments.map(p=>({id:genId(site),siteId:site,purchaseId:id,amountCents:p.amountCents,method:p.method,
+   const rows:OpsPayment[]=payments.filter(p=>p.method!=='credit_note').map(p=>({id:genId(site),siteId:site,purchaseId:id,amountCents:p.amountCents,method:p.method,
      reconciliationStatus:['cash','credit_note'].includes(p.method)?'not_applicable':'pending',paidDate:purchaseDate}));
    setData(d=>({...d,purchases:[row,...d.purchases],payments:[...d.payments,...rows],
      documents:evidence?[...d.documents,{id:genId(site),siteId:site,purchaseId:id,storagePath:'demo:image-resized-locally',mime:'image/jpeg',size:evidence.size}]:d.documents}));
    setSelection(id);
   }
-  setNotes('');setTerms('');setTotal('');setTenders([]);setEvidence(null);setReceiptDeliveredAtPurchase(false);setRecentSaved('Compra guardada. Para consultarla o hacer seguimiento utiliza un periodo de fechas.');setHistoryLoaded(false);
+  setNotes('');setTerms('');setTotal('');setTenders([]);setPurchaseOrderId('');setEvidence(null);setReceiptDeliveredAtPurchase(false);setRecentSaved('Compra guardada. Para consultarla o hacer seguimiento utiliza un periodo de fechas.');setHistoryLoaded(false);
  }
  function openPurchaseEdit(p:OpsPurchase){
   setSelection(p.id);setEditingPurchase(p.id);setEditSupplier(p.supplierId);setEditDate(p.purchaseDate);setEditTotal((p.totalCents/100).toFixed(2));setEditNotes(p.notes??'');
