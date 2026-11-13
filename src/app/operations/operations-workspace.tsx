@@ -362,7 +362,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
     <label>Empresa operativa<select value={site} onChange={e=>chooseSite(e.target.value as OpsSite)}>
        {SITES.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
     </select></label>
-    <div className="ops-toolbar-note">Los catálogos operativos se consultan desde Firestore por empresa. En Demo se crean en memoria y no quedan guardados.</div>
+    {workspace==="admin"&&<div className="ops-toolbar-note">Los catálogos operativos se consultan desde Firestore por empresa. En Demo se crean en memoria y no quedan guardados.</div>}
    </div>
    {workspace==='admin'&&!demoMode&&<div className="ops-auth">
      {user?<div className="ops-flex"><span>Sesión: {user.email}</span><button onClick={()=>void work(()=>refreshLive())} disabled={busy}>Consultar empresas seleccionadas</button><button onClick={()=>{setSuperadminVerified(false);setShowroomAuthorized(false);setShowroomData(null);setData(EMPTY_OPS);setTab('compras');void signOut(auth!);}}>Salir</button></div>:
@@ -378,17 +378,17 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
     ).map(t=><button key={t.id} className={tab===t.id?'active':''} onClick={()=>setTab(t.id)}>{t.title}</button>)}</nav>
    {tab==='compras'&&<div className="ops-capture-layout">
     <section className="ops-card ops-purchase-form">
-     <h2>Nueva compra</h2><p className="ops-hint">Registra el proveedor, importe, cómo se pagó y fotografía el ticket. El detalle de artículos se captura en Recepción.</p>
+     <h2>Nueva compra</h2>
      <label>Proveedor<select value={supplierId} onChange={e=>setSupplierId(e.target.value)}><option value="">Seleccionar proveedor</option>
        {active.suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-     <div className="ops-quick-add"><button type="button" onClick={()=>setInlineNewSupplier(p=>!p)}>{inlineNewSupplier?'Cancelar':'+ Crear proveedor'}</button></div>
+     <div className="ops-quick-add"><button type="button" onClick={()=>setInlineNewSupplier(p=>!p)}>{inlineNewSupplier?'Cancelar':'+ Proveedor'}</button></div>
      {inlineNewSupplier&&<div className="ops-inline-editor">
        <label>Nombre del proveedor<input value={newSupplier} onChange={e=>setNewSupplier(e.target.value)} placeholder="Ej. Proveedor local"/></label>
        <button disabled={busy||newSupplier.trim().length<2} onClick={()=>void work(addSupplier)}>Guardar y seleccionar proveedor</button>
      </div>}
      <div className="ops-grid-2"><label>Fecha<input type="date" value={purchaseDate} onChange={e=>setPurchaseDate(e.target.value)}/></label>
       <label>Total de la compra (CAD)<input type="text" inputMode="decimal" placeholder="0.00" value={total} onChange={e=>setTotal(e.target.value)}/></label></div>
-     <div className="ops-payments-title"><h3>Formas de pago</h3><button type="button" onClick={()=>setTenders(rows=>[...rows,{id:crypto.randomUUID(),method:'cash',amount:''}])}>+ Otro medio</button></div>
+     <div className="ops-payments-title"><h3>Pago</h3><button type="button" onClick={()=>setTenders(rows=>[...rows,{id:crypto.randomUUID(),method:'cash',amount:''}])}>+ Otro medio</button></div>
      <div className="ops-payments-compact">
        {tenders.map(p=><div className="ops-payment-line" key={p.id}>
         <label>Medio<select aria-label="Medio de pago" value={p.method} onChange={e=>setTenders(rows=>rows.map(x=>x.id===p.id?{...x,method:e.target.value as OpsPayment['method']}:x))}>
@@ -407,13 +407,10 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
      {draftBalance>0&&<label>Plazo pactado a crédito (días, opcional)<input type="number" min="1" max="365" step="1" placeholder="Sin plazo definido" value={terms} onChange={e=>setTerms(e.target.value)}/></label>}
      {draftBalance<0&&<p className="ops-error">Los pagos no pueden superar el total de la compra.</p>}
      <div className="ops-receipt-picker">
-      <h3>Fotografía del ticket o factura</h3>
-      <label className="ops-photo-label">📷 Tomar foto o seleccionar imagen<input type="file" accept="image/jpeg,image/png,image/webp,image/*" capture="environment" onChange={e=>setEvidence(e.target.files?.[0]??null)}/></label>
-      {evidence?<p className="ops-hint">✓ {evidence.name} ({(evidence.size/1024/1024).toFixed(1)} MB). Se reducirá a JPEG, máximo 1600 px antes de subir a Firebase Storage.</p>
-        :<p className="ops-hint">Puedes guardar pendiente de comprobante, pero para marcarlo entregado primero debes adjuntar la imagen.</p>}
+      <label className="ops-photo-label">📷 {evidence?evidence.name:"Foto del ticket (opcional)"}<input aria-label="Fotografía del ticket" type="file" accept="image/jpeg,image/png,image/webp,image/*" capture="environment" onChange={e=>setEvidence(e.target.files?.[0]??null)}/></label>
       <label className="ops-inline-check"><input type="checkbox" checked={receiptDeliveredAtPurchase} onChange={e=>setReceiptDeliveredAtPurchase(e.target.checked)}/> Ya entregué el comprobante</label>
      </div>
-     <label>Observaciones (opcional)<textarea rows={2} placeholder="Comentarios de la compra" value={notes} onChange={e=>setNotes(e.target.value)}/></label>
+     <details className="ops-purchase-extra"><summary>Observaciones (opcional)</summary><label>Observaciones<textarea rows={2} placeholder="Comentarios de la compra" value={notes} onChange={e=>setNotes(e.target.value)}/></label></details>
      <button className="ops-primary" disabled={busy||!supplierId||!Number.isFinite(draftBalance)||draftBalance<0||draftCents<1||tenders.some(p=>!p.amount.trim())} onClick={()=>void work(addPurchase)}>{busy?'Guardando…':'Guardar compra'}</button>
     </section>
     {recentSaved&&<p role="status" className="ops-saved-notice">{recentSaved}</p>}
