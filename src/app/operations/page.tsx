@@ -82,7 +82,7 @@ export default function Operations(){
  const [terms,setTerms]=useState('30'),[tenders,setTenders]=useState<Tender[]>([]),[notes,setNotes]=useState('');
  const [receiptDeliveredAtPurchase,setReceiptDeliveredAtPurchase]=useState(false),[inlineNewProduct,setInlineNewProduct]=useState(false),[inlineNewPresentation,setInlineNewPresentation]=useState(false);
  const [payAmount,setPayAmount]=useState(''),[payMethod,setPayMethod]=useState<OpsPayment['method']>('transfer');
- const [recipient,setRecipient]=useState(''),[verifier,setVerifier]=useState(''),[evidence,setEvidence]=useState<File|null>(null),[existingEvidence,setExistingEvidence]=useState<File|null>(null);
+ const [recipient,setRecipient]=useState(''),[evidence,setEvidence]=useState<File|null>(null),[existingEvidence,setExistingEvidence]=useState<File|null>(null);
  const [newSupplier,setNewSupplier]=useState(''),[newProduct,setNewProduct]=useState(''),[productUnit,setProductUnit]=useState<'kg'|'l'|'unit'>('kg');
  const [presentationProduct,setPresentationProduct]=useState('htl_feta'),[newPresentationLabel,setNewPresentationLabel]=useState('');
  const [packCount,setPackCount]=useState('750'),[packUnit,setPackUnit]=useState<OpsUnit>('g');
@@ -220,10 +220,9 @@ export default function Operations(){
   setLineCost('');
  }
  async function verifyGoods(){
-  if(!selected||selected.goodsStatus!=='received'||selected.receiptCount<1||verifier.trim().length<2)throw new Error('Selecciona una recepción completa y escribe el responsable de la validación.');
-  if(mode==='live'){await request('goods.verify',{purchaseId:selected.id,verifier});await refreshLive();}
+  if(!selected||selected.goodsStatus!=='received'||selected.receiptCount<1)throw new Error('Registra los artículos y confirma que la mercancía está completa.');
+  if(mode==='live'){await request('goods.verify',{purchaseId:selected.id,verifier:user?.email||'Almacén'});await refreshLive();}
   else setChange(selected.id,{goodsStatus:'verified'});
-  setVerifier('');
  }
  async function viewEvidence(id:string){
   if(!user)throw new Error('Debes iniciar sesión para consultar el comprobante.');
@@ -341,33 +340,86 @@ export default function Operations(){
     </section>
    </div>}
    {tab==='recepcion'&&<div className="ops-layout">
-    <section className="ops-card"><h2>Entrada de mercancía</h2>
-     <label>Compra<select value={selected?.id??''} onChange={e=>setSelection(e.target.value)}>
-      <option value="">Selecciona compra</option>{active.purchases.map(p=><option key={p.id} value={p.id}>{p.supplierName} · {cash(p.totalCents)}</option>)}</select></label>
-     <label>Presentación del producto<select value={receivingPresentation} onChange={e=>setReceivingPresentation(e.target.value)}>
-      <option value="">Seleccionar presentación</option>{active.presentations.map(p=>{
-       const product=active.products.find(x=>x.id===p.productId);return <option key={p.id} value={p.id}>{product?.name} · {p.label}</option>;
-      })}</select></label>
-     <div className="ops-grid-2"><label>Paquetes recibidos<input type="number" min="0.001" step="any" value={receivedPacks} onChange={e=>setReceivedPacks(e.target.value)}/></label>
-      <label>Estado de recepción<select value={receptionState} onChange={e=>setReceptionState(e.target.value as 'partial'|'received')}>
-       <option value="received">Recibida</option><option value="partial">Parcial</option></select></label></div>
-     {currentPresentation&&<div className="ops-measure">Equivalencia de entrada<strong>
-      {(Number(receivedPacks)*currentPresentation.unitAmount||0).toLocaleString('es-CA',{maximumFractionDigits:6})} {currentPresentation.unit}
-     </strong><small>{receivedPacks||0} × {currentPresentation.label}</small></div>}
-     <button className="ops-primary" disabled={busy||!selected||!currentPresentation} onClick={()=>void work(addReceipt)}>Guardar renglón recibido</button>
-     <p className="ops-hint">Recepción física y compra son eventos separados. Esta versión registra la entrada recibida, sin descontar insumos desde Producción.</p>
-    </section>
-    <section className="ops-card"><h2>Detalle de recepciones</h2>
-     {selected?<><p className="ops-hint">{selected.supplierName} · {selected.purchaseDate}</p>
-     <div className="ops-mini-list">{active.receipts.filter(x=>x.purchaseId===selected.id).map(r=><div key={r.id}>
-      <strong>{r.productName}</strong> · {r.packQuantity} × {r.presentationLabel}<small>{r.receivedBaseAmount} {r.unit}</small>
-     </div>)}</div></>:<p>Selecciona una compra.</p>}
-     {selected?.goodsStatus==='received'&&selected.receiptCount>0&&<div className="ops-detail">
-      <h3>Validación final de mercancía</h3>
-      <label>Responsable que verifica<input value={verifier} onChange={e=>setVerifier(e.target.value)} placeholder="Nombre del encargado"/></label>
-      <button disabled={busy||verifier.trim().length<2} onClick={()=>void work(verifyGoods)}>Confirmar entrega / recepción validada</button>
+    <section className="ops-card">
+     <h2>Recibir mercancía</h2><p className="ops-hint">Selecciona la compra, agrega los productos que llegaron y confirma la entrada física. No hay conexión automática con las recetas de Producción.</p>
+     <label>Compra pendiente de recepción<select value={selected?.id??''} onChange={e=>{setSelection(e.target.value);setLineCost('');}}>
+      <option value="">Selecciona la compra</option>{active.purchases.map(p=><option key={p.id} value={p.id}>{p.purchaseDate} · {p.supplierName} · {cash(p.totalCents)}</option>)}</select></label>
+     {selected&&<div className="ops-receive-context"><strong>{selected.supplierName}</strong><span>Total de compra: {cash(selected.totalCents)}</span><span>Comprobante: {status(selected.documentStatus)}</span></div>}
+     <div className="ops-divider"/>
+     <div className="ops-section-title"><h3>1 · Producto recibido</h3><button type="button" onClick={()=>setInlineNewProduct(!inlineNewProduct)}>{inlineNewProduct?'Cancelar':'+ Nuevo producto'}</button></div>
+     <label>Producto maestro<select value={receivingProduct} onChange={e=>{const id=e.target.value;setReceivingProduct(id);setPresentationProduct(id);setReceivingPresentation('');const p=active.products.find(x=>x.id===id);if(p)setPackUnit(p.unit);}}>
+      <option value="">Selecciona producto</option>{active.products.map(p=><option key={p.id} value={p.id}>{p.name} ({p.unit})</option>)}</select></label>
+     {inlineNewProduct&&<div className="ops-inline-editor">
+      <h3>Crear producto maestro</h3><label>Nombre<input value={newProduct} onChange={e=>setNewProduct(e.target.value)} placeholder="Ej. Queso feta"/></label>
+      <label>Unidad de control<select value={productUnit} onChange={e=>setProductUnit(e.target.value as 'kg'|'l'|'unit')}><option value="kg">Masa (kg)</option><option value="l">Volumen (L)</option><option value="unit">Piezas</option></select></label>
+      <button type="button" disabled={busy||newProduct.trim().length<2} onClick={()=>void work(addProduct)}>Crear y seleccionar producto</button>
      </div>}
-     <p className="ops-hint">La confirmación del saldo físico por presentación y los conteos de almacén se completarán en el incremento de Inventario.</p>
+     <div className="ops-divider"/>
+     <div className="ops-section-title"><h3>2 · Presentación</h3><button type="button" disabled={!receivingProductObj} onClick={()=>{setPresentationProduct(receivingProduct);if(receivingProductObj)setPackUnit(receivingProductObj.unit);setInlineNewPresentation(!inlineNewPresentation);}}>{inlineNewPresentation?'Cancelar':'+ Nueva presentación'}</button></div>
+     <label>Presentación comercial<select value={receivingPresentation} onChange={e=>setReceivingPresentation(e.target.value)} disabled={!receivingProduct}>
+      <option value="">Seleccionar presentación</option>{receivingPresentations.map(p=><option key={p.id} value={p.id}>{p.label} · {p.unitAmount} {p.unit}</option>)}</select></label>
+     {inlineNewPresentation&&receivingProductObj&&<div className="ops-inline-editor">
+      <h3>Agregar presentación a {receivingProductObj.name}</h3>
+      <label>Descripción<input placeholder="Ej. Bolsa 750 g" value={newPresentationLabel} onChange={e=>setNewPresentationLabel(e.target.value)}/></label>
+      <div className="ops-grid-2"><label>Contenido por paquete<input type="number" step="any" min="0.001" value={packCount} onChange={e=>setPackCount(e.target.value)}/></label>
+       <label>Unidad<select value={packUnit} onChange={e=>setPackUnit(e.target.value as OpsUnit)}>{(['kg','g','lb','l','ml','unit','portion'] as OpsUnit[]).filter(u=>normalUnit(u)===receivingProductObj.unit).map(u=><option key={u} value={u}>{uLabel[u]}</option>)}</select></label></div>
+      <button type="button" disabled={busy||!newPresentationLabel.trim()} onClick={()=>void work(addPresentation)}>Guardar y utilizar presentación</button>
+     </div>}
+     <div className="ops-divider"/>
+     <h3>3 · Cantidad y costo del artículo</h3>
+     <div className="ops-grid-2"><label>Paquetes recibidos<input type="number" min="0.001" step="any" inputMode="decimal" value={receivedPacks} onChange={e=>setReceivedPacks(e.target.value)}/></label>
+      <label>Importe del artículo antes de impuestos (CAD)<input type="number" min="0" step="0.01" inputMode="decimal" placeholder="Opcional" value={lineCost} onChange={e=>setLineCost(e.target.value)}/></label></div>
+     {currentPresentation&&<div className="ops-measure"><span>Cantidad equivalente recibida</span><strong>{Number.isFinite(Number(receivedPacks)*currentPresentation.unitAmount)?(Number(receivedPacks)*currentPresentation.unitAmount).toLocaleString('es-CA',{maximumFractionDigits:6}):'—'} {currentPresentation.unit}</strong>
+      <small>{receivedPacks||0} paquete(s) de {currentPresentation.label}</small></div>}
+     <label>¿La entrega de esta compra está completa?<select value={receptionState} onChange={e=>setReceptionState(e.target.value as 'partial'|'received')}><option value="partial">Todavía faltan artículos</option><option value="received">Sí, mercancía completa</option></select></label>
+     <button className="ops-primary" disabled={busy||!selected||!currentPresentation||Number(receivedPacks)<=0} onClick={()=>void work(addReceipt)}>+ Agregar producto recibido</button>
+    </section>
+    <section className="ops-card">
+     <h2>Entrada por compra</h2>
+     {selected?<><p className="ops-hint">{selected.supplierName} · {selected.purchaseDate} · {cash(selected.totalCents)}</p>
+      <div className="ops-mini-list">{active.receipts.filter(x=>x.purchaseId===selected.id).map(r=><div key={r.id}><span><strong>{r.productName}</strong><small>{r.packQuantity} × {r.presentationLabel}</small></span>
+       <span>{r.receivedBaseAmount} {r.unit}{typeof r.lineTotalCents==='number'&&<small>{cash(r.lineTotalCents)} · costo registrado</small>}</span></div>)}</div>
+      {!active.receipts.some(x=>x.purchaseId===selected.id)&&<p className="ops-hint">Todavía no se han registrado productos de esta compra. Utiliza el formulario de la izquierda.</p>}
+      <div className="ops-divider"/>
+      <h3>Confirmaciones de recepción</h3>
+      <label className="ops-inline-check"><input type="checkbox" checked={selected.goodsStatus==='verified'} disabled={busy||selected.goodsStatus==='verified'||selected.goodsStatus!=='received'||selected.receiptCount<1} onChange={e=>{if(e.target.checked)void work(verifyGoods);}}/> Mercancía entregada y recibida correctamente</label>
+      <label className="ops-inline-check"><input type="checkbox" checked={selected.receiptAcknowledged===true||selected.documentStatus==='received'} disabled={busy||selected.documentStatus==='received'||selected.documentStatus!=='delivered'} onChange={e=>{if(e.target.checked)void work(()=>changeDocument('received',selected));}}/> Comprobante original recibido</label>
+      <p className="ops-hint">Para confirmar mercancía se requiere al menos una línea recibida y la entrega marcada como completa. El acuse de comprobante requiere que Compras lo haya marcado entregado.</p>
+      <div className="ops-status-line"><span>Mercancía: {status(selected.goodsStatus)}</span><span>Comprobante: {status(selected.documentStatus)}</span></div>
+     </>:<p>Selecciona una compra para capturar su mercancía.</p>}
+    </section>
+   </div>}
+   {tab==='conciliacion'&&<div className="ops-layout">
+    <section className="ops-card">
+     <h2>Pagos y crédito de proveedores</h2>
+     <p className="ops-hint">Una compra a crédito genera una deuda. Su conciliación bancaria se realiza cuando existe un pago real; el crédito en sí no aparecerá en el statement.</p>
+     <label>Compra<select value={selected?.id??''} onChange={e=>setSelection(e.target.value)}><option value="">Seleccionar compra</option>
+       {active.purchases.map(p=><option key={p.id} value={p.id}>{p.supplierName} · {cash(p.totalCents)} · saldo {cash(p.balanceCents)}</option>)}</select></label>
+     {selected&&<><div className="ops-payment-summary"><div><span>Total comprado</span><strong>{cash(selected.totalCents)}</strong></div>
+       <div><span>Pagos aplicados</span><strong>{cash(selected.paidCents)}</strong></div><div><span>Saldo por pagar</span><strong>{cash(selected.balanceCents)}</strong></div></div>
+      <h3>Registrar pago o abono posterior</h3>
+      <div className="ops-grid-2"><label>Importe (CAD)<input type="number" inputMode="decimal" min="0.01" step="0.01" value={payAmount} onChange={e=>setPayAmount(e.target.value)}/></label>
+       <label>Medio<select value={payMethod} onChange={e=>setPayMethod(e.target.value as OpsPayment['method'])}>{tenderMethods.map(m=><option key={m.value} value={m.value}>{m.label}</option>)}</select></label></div>
+      <button disabled={busy||selected.balanceCents===0} onClick={()=>void work(addPayment)}>Aplicar abono a la deuda</button>
+      <div className="ops-mini-list">{associated.map(p=><div key={p.id}>{cash(p.amountCents)} · {tenderMethods.find(m=>m.value===p.method)?.label??p.method}<small>{p.reconciliationStatus==='pending'?'Pendiente de conciliar':'Sin cargo bancario directo'}</small></div>)}</div>
+     </>}
+    </section>
+    <section className="ops-card">
+     <h2>Conciliación y análisis de costos</h2>
+     <p className="ops-hint">Etapa financiera independiente. Los pagos con tarjeta o transferencia deben coincidir con su movimiento bancario; los cargos sin compra asociada quedarán como excepciones.</p>
+     <h3>Pagos que requieren match bancario</h3>
+     <div className="ops-mini-list">{active.payments.filter(p=>p.reconciliationStatus==='pending').map(p=><div key={p.id}><span>{active.purchases.find(x=>x.id===p.purchaseId)?.supplierName??'Proveedor'}</span>
+      <span>{cash(p.amountCents)}<small>{tenderMethods.find(m=>m.value===p.method)?.label??p.method} · Por conciliar</small></span></div>)}</div>
+     {!active.payments.some(p=>p.reconciliationStatus==='pending')&&<p className="ops-hint">Sin pagos bancarios pendientes en los datos cargados.</p>}
+     <div className="ops-divider"/>
+     <h3>Costos capturados por producto maestro</h3>
+     <div className="ops-mini-list">{active.products.map(prod=>{
+       const rows=active.receipts.filter(r=>r.productId===prod.id&&typeof r.lineTotalCents==='number'&&r.receivedBaseAmount>0);
+       const units=rows.reduce((n,r)=>n+r.receivedBaseAmount,0),cost=rows.reduce((n,r)=>n+(r.lineTotalCents??0),0);
+       return <div key={prod.id}><span>{prod.name}<small>{rows.length} línea(s) con costo</small></span>
+        <span>{rows.length&&units>0?cash(Math.round(cost/units))+' / '+prod.unit:'Pendiente de capturar costos'}</span></div>;
+     })}</div>
+     <p className="ops-hint">La carga de estados de cuenta, asignación de movimientos y detección de cargos sin compra respaldada se implementará en el incremento de Conciliación. No se marcan pagos como conciliados sin evidencia.</p>
     </section>
    </div>}
    {tab==='catalogos'&&<div className="ops-layout">
