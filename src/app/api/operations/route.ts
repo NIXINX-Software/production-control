@@ -281,13 +281,13 @@ export async function POST(req:NextRequest){
   }
   if(action==='document.status'){
     const id=text(body.purchaseId,130),status=body.status,recipient=text(body.recipient,120)||actor;
-    if(!['delivered','received','rejected'].includes(String(status)))throw new Error('INVALID_HANDOFF');
+    if(!['delivered','received','rejected','captured','missing'].includes(String(status)))throw new Error('INVALID_HANDOFF');
     const ref=store.collection('ops_purchases').doc(id);
     await store.runTransaction(async tx=>{
       const doc=await tx.get(ref),p=doc.data();
       if(!p||p.siteId!==site||p.cancelled===true)throw new Error('INVALID_DOCUMENT_STATE');
       // A physical original may be handed over without a photographed copy.
-      if(status==='rejected'&&!['delivered','received'].includes(p.documentStatus))throw new Error('INVALID_DOCUMENT_STATE');
+      if(status==='captured'&&!(p.documentCount>0)||status==='missing'&&p.documentCount>0)throw new Error('INVALID_DOCUMENT_STATE');
       tx.update(ref,{documentStatus:status,receiptDelivered:status==='delivered'||status==='received',receiptAcknowledged:status==='received',updatedAt:now});
       tx.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId:id,action:'document.'+status,recipient,actor,createdAt:now});
     });
