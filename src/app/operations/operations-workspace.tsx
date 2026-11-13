@@ -351,9 +351,27 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
   setLineCost('');
  }
  async function verifyGoods(){
-  if(!selected||selected.goodsStatus!=='received'||selected.receiptCount<1)throw new Error('Registra los artículos y confirma que la mercancía está completa.');
-  if(mode==='live'){await request('goods.verify',{purchaseId:selected.id,verifier:user?.email||'Almacén'});await refreshLive();}
+  if(!selected||selected.receiptCount<1)throw new Error('Registra primero los artículos recibidos.');
+  if(mode==='live'){await request('goods.complete',{purchaseId:selected.id,verifier:user?.email||'Recepción'});await refreshLive();}
   else setChange(selected.id,{goodsStatus:'verified'});
+  setSelection('');
+  setMsg('Compra recibida y retirada de pendientes.');
+ }
+ async function setBankStatus(p:OpsPurchase,verified:boolean){
+  const reference=window.prompt(verified?'Referencia del movimiento en el estado de cuenta:':'Referencia de la corrección bancaria:');
+  if(reference===null)return;
+  if(reference.trim().length<3)throw new Error('Indica una referencia bancaria.');
+  const reviewer=window.prompt('Nombre de quien verificó el estado de cuenta:');
+  if(reviewer===null)return;
+  if(reviewer.trim().length<2)throw new Error('Indica el responsable.');
+  if(mode==='live'){
+   await request(verified?'bank.reconcile':'bank.unreconcile',{purchaseId:p.id,reference:reference.trim(),reviewer:reviewer.trim()});
+   await refreshLive();
+  }else setChange(p.id,{bankStatus:verified?'reconciled':'pending_reconciliation'});
+ }
+ async function setDocumentCheck(p:OpsPurchase,next:'delivered'|'received'|'captured'|'missing'){
+  if((next==='captured'||next==='missing')&&!window.confirm('¿Corregir el estatus del comprobante? La corrección quedará auditada.'))return;
+  await changeDocument(next,p);
  }
  async function viewEvidence(id:string){
  
@@ -383,7 +401,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
   if(!selected||!existingEvidence)throw new Error('Selecciona una imagen y una compra.');
   await uploadFileFor(selected.id,existingEvidence);setExistingEvidence(null);
  }
- async function changeDocument(next:'delivered'|'received'|'rejected',purchase:OpsPurchase|undefined=selected){
+ async function changeDocument(next:'delivered'|'received'|'rejected'|'captured'|'missing',purchase:OpsPurchase|undefined=selected){
   if(!purchase)throw new Error('Selecciona una compra.');
   if(mode==='live'){await request('document.status',{purchaseId:purchase.id,status:next,recipient:recipient.trim()||user?.email||'Compras'});await refreshLive();}
   else setChange(purchase.id,{documentStatus:next,receiptDelivered:next==='delivered'||next==='received',receiptAcknowledged:next==='received'});
@@ -522,7 +540,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
     <section className="ops-card">
      <h2>Recibir mercancía</h2><p className="ops-hint">Selecciona la compra, agrega los productos que llegaron y confirma la entrada física. No hay conexión automática con las recetas de Producción.</p>
      <label>Compra pendiente de recepción<select value={selected?.id??''} onChange={e=>{setSelection(e.target.value);setLineCost('');}}>
-      <option value="">Selecciona la compra</option>{active.purchases.map(p=><option key={p.id} value={p.id}>{p.purchaseDate} · {p.supplierName} · {cash(p.totalCents)}</option>)}</select></label>
+      <option value="">Selecciona una compra pendiente</option>{active.purchases.filter(p=>p.goodsStatus!=='verified'&&!p.cancelled).map(p=><option key={p.id} value={p.id}>{p.folio??p.purchaseDate} · {p.supplierName} · {cash(p.totalCents)}</option>)}</select></label>
      {selected&&<div className="ops-receive-context"><strong>{selected.supplierName}</strong><span>Total de compra: {cash(selected.totalCents)}</span><span>Comprobante: {status(selected.documentStatus)}</span></div>}
      <div className="ops-divider"/>
      <div className="ops-section-title"><h3>1 · Producto maestro</h3><button type="button" onClick={()=>setInlineNewProduct(!inlineNewProduct)}>{inlineNewProduct?'Cancelar':'+ Crear producto maestro'}</button></div>
@@ -560,15 +578,15 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
     </section>
     <section className="ops-card">
      <h2>Entrada por compra</h2>
-     {selected?<><p className="ops-hint">{selected.supplierName} · {selected.purchaseDate} · {cash(selected.totalCents)}</p>
+     {selected?<><p className="ops-hint">{selected.folio??selected.id.slice(0,12)} · {selected.supplierName} · {selected.purchaseDate} · {cash(selected.totalCents)}</p>
       <div className="ops-mini-list">{active.receipts.filter(x=>x.purchaseId===selected.id).map(r=><div key={r.id}><span><strong>{r.productName}</strong><small>{r.packQuantity} × {r.presentationLabel}</small></span>
        <span>{r.receivedBaseAmount} {r.unit}{typeof r.lineTotalCents==='number'&&<small>{cash(r.lineTotalCents)} · costo registrado</small>}</span></div>)}</div>
       {!active.receipts.some(x=>x.purchaseId===selected.id)&&<p className="ops-hint">Todavía no se han registrado productos de esta compra. Utiliza el formulario de la izquierda.</p>}
       <div className="ops-divider"/>
       <h3>Confirmaciones de recepción</h3>
-      <label className="ops-inline-check"><input type="checkbox" checked={selected.goodsStatus==='verified'} disabled={busy||selected.goodsStatus==='verified'||selected.goodsStatus!=='received'||selected.receiptCount<1} onChange={e=>{if(e.target.checked)void work(verifyGoods);}}/> Mercancía entregada y recibida correctamente</label>
-      <label className="ops-inline-check"><input type="checkbox" checked={selected.receiptAcknowledged===true||selected.documentStatus==='received'} disabled={busy||selected.documentStatus==='received'||selected.documentStatus!=='delivered'} onChange={e=>{if(e.target.checked)void work(()=>changeDocument('received',selected));}}/> Comprobante original recibido</label>
-      <p className="ops-hint">Para confirmar mercancía se requiere al menos una línea recibida y la entrega marcada como completa. El acuse de comprobante requiere que Compras lo haya marcado entregado.</p>
+      <button type="button" className="ops-primary" disabled={busy||selected.goodsStatus==='verified'||selected.receiptCount<1} onClick={()=>void work(verifyGoods)}>✓ Confirmar compra recibida y retirar de pendientes</button>
+      <label className="ops-inline-check"><input type="checkbox" checked={selected.receiptAcknowledged===true||selected.documentStatus==='received'} disabled={busy} onChange={e=>void work(()=>setDocumentCheck(selected,e.target.checked?'received':'delivered'))}/> Comprobante original recibido</label>
+      <p className="ops-hint">Confirma la recepción física después de registrar artículos. El comprobante original puede marcarse recibido aunque no se haya fotografiado; ambos procesos se auditan por separado.</p>
       <div className="ops-status-line"><span>Mercancía: {status(selected.goodsStatus)}</span><span>Comprobante: {status(selected.documentStatus)}</span></div>
      </>:<p>Selecciona una compra para capturar su mercancía.</p>}
     </section>
@@ -586,7 +604,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
       {matchedRows.length>0&&<div className="ops-history-scroll"><table className="ops-history-table">
        <thead><tr><th>Fecha / proveedor</th><th>Total</th><th>Ticket entregado</th><th>Mercancía recibida</th><th>Ticket recibido</th><th>Banco conciliado</th><th>Seguimiento</th></tr></thead>
        <tbody>{matchedRows.map(p=><tr key={p.id}>
-        <td data-label="Compra"><strong>{p.supplierName}</strong><small>{p.purchaseDate} · {p.id.slice(0,12)}</small></td>
+        <td data-label="Compra"><strong>{p.supplierName}</strong><small>{p.purchaseDate} · {p.folio??p.id.slice(0,12)}</small></td>
         <td data-label="Total"><strong>{cash(p.totalCents)}</strong>{p.balanceCents>0&&<small>Saldo {cash(p.balanceCents)}</small>}</td>
         <td data-label="Ticket entregado"><input type="checkbox" disabled readOnly checked={p.receiptDelivered===true||['delivered','received'].includes(p.documentStatus)} aria-label="Ticket entregado" title="Se marca al registrar la entrega del ticket"/></td>
         <td data-label="Mercancía recibida"><input type="checkbox" disabled readOnly checked={['received','verified'].includes(p.goodsStatus)} aria-label="Mercancía recibida" title="Según la recepción física registrada"/></td>
