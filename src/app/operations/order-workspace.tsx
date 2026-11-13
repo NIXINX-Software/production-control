@@ -275,8 +275,8 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
        <td><input aria-label="Cantidad nueva" type="number" min="0.001" step="any" placeholder="0" value={quantity} onChange={e=>setQuantity(e.target.value)}/></td>
        <td><select aria-label="Unidad nueva" disabled={!pId} value={unit} onChange={e=>setUnit(e.target.value as OpsUnit)}>{allowedUnits.map(u=><option key={u} value={u}>{PC_UNITS.find(x=>x.id===u)?.es??u}</option>)}</select></td>
        <td>{money(selectedAvg)}{selectedProduct?' / '+selectedProduct.unit:''}</td>
-       <td>{selectedAvg===null?'Sin costo':money(Math.round(baseAmount(Number(quantity)||0,unit)*selectedAvg))}</td><td>—</td>
-       {OPS_APPROVAL_AREAS.map(a=><td key={a} className="ops-approval-cell">—</td>)}<td>—</td><td>—</td>
+       <td>{selectedAvg===null?'Sin costo':Number(quantity)>0?money(Math.round(baseAmount(Number(quantity),unit)*selectedAvg)):money(0)}</td><td>—</td>
+       {OPS_APPROVAL_AREAS.map(a=><td key={a} className="ops-approval-cell"><input type="checkbox" aria-label={'Validación '+a+' pendiente de guardar'} checked={false} disabled title="Añade el producto y guarda la propuesta para poder validar cada área."/></td>)}<td>—</td><td className="ops-approval-cell"><input type="checkbox" aria-label="Autorización final pendiente de guardar" checked={false} disabled title="Requiere orden guardada y validación de las áreas."/></td>
        <td><button type="button" disabled={!pId||!(Number(quantity)>0)} onClick={()=>{try{addLine();}catch(e){setError(String(e));}}}>+ Añadir</button></td>
       </tr>
      </tbody>
