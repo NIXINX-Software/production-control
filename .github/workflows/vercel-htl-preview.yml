@@ -17,9 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN_HOT_TACOS_PRODUCTION_CONTROL }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN_HOT_TACOS_LEAMINGTON_PRODUCTION_CONTROL }}
       VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID_HOT_TACOS_PRODUCTION_CONTROL }}
-      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_HOT_TACOS_PRODUCTION_CONTROL }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_HOT_TACOS_LEAMINGTON_PRODUCTION_CONTROL }}
     steps:
       - name: Checkout NIXINX source
         uses: actions/checkout@v4
