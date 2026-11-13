@@ -35,7 +35,7 @@ export type OpsPresentation={id:string;siteId:OpsSite;productId:string;label:str
 export type OpsPurchase={
  id:string;siteId:OpsSite;purchaseDate:string;supplierId:string;supplierName:string;totalCents:number;currency:'CAD';
  paidCents:number;balanceCents:number;dueDate:string|null;goodsStatus:'pending'|'partial'|'received'|'verified'|'discrepancy';
- documentStatus:'missing'|'captured'|'delivered'|'received'|'rejected';bankStatus:'awaiting_payment'|'pending_reconciliation'|'not_applicable';
+ documentStatus:'missing'|'captured'|'delivered'|'received'|'rejected';bankStatus:'awaiting_payment'|'pending_reconciliation'|'not_applicable'|'reconciled';
  receiptCount:number;documentCount:number;receiptDelivered:boolean;receiptAcknowledged:boolean;notes:string;createdAt?:unknown;
 };
 export type OpsPayment={id:string;siteId:OpsSite;purchaseId:string;amountCents:number;method:'cash'|'debit_card'|'credit_card'|'credit_note'|'card'|'transfer'|'other';reference?:string;reconciliationStatus:'not_applicable'|'pending';paidDate:string};
