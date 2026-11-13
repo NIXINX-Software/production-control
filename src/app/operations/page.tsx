@@ -5,7 +5,6 @@ import {onAuthStateChanged,signInWithEmailAndPassword,signOut,type User} from 'f
 import {auth} from '@/lib/firebase';
 import {baseAmount,bankStatusForPayments,EMPTY_OPS,normalUnit,purchaseBalances,purchaseSummary,
  type OpsSite,type OpsUnit,type OpsSnapshot,type OpsPurchase,type OpsPayment,type OpsPresentation} from '@/lib/ops-contract';
-import {SHOWROOM_ONLY} from '@/lib/ops-showroom-fixture';
 import './operations.css';
 
 type Panel='compras'|'recepcion'|'conciliacion'|'catalogos'|'kpis'|'showroom'|'datos';
@@ -46,6 +45,7 @@ export default function Operations(){
  const [tab,setTab]=useState<Panel>('compras'),[mode,setMode]=useState<ViewMode>('demo'),[site,setSite]=useState<OpsSite>('htl');
  const [scope,setScope]=useState<OpsSite[]>(['htl']),[data,setData]=useState<OpsSnapshot>(EMPTY_OPS);
  const [superadminVerified,setSuperadminVerified]=useState(false);
+ const [showroomAuthorized,setShowroomAuthorized]=useState(false),[showroomData,setShowroomData]=useState<OpsSnapshot|null>(null);
  const [user,setUser]=useState<User|null>(null),[email,setEmail]=useState(''),[password,setPassword]=useState('');
  const [busy,setBusy]=useState(false),[msg,setMsg]=useState(''),[selection,setSelection]=useState('');
  const [supplierId,setSupplierId]=useState(''),[total,setTotal]=useState(''),[purchaseDate,setPurchaseDate]=useState(dateToday());
@@ -60,7 +60,40 @@ export default function Operations(){
  const [packCount,setPackCount]=useState(''),[packUnit,setPackUnit]=useState<OpsUnit>('g');
  const [receivingProduct,setReceivingProduct]=useState(''),[receivingPresentation,setReceivingPresentation]=useState(''),[receivedPacks,setReceivedPacks]=useState(''),[lineCost,setLineCost]=useState('');
  const [receptionState,setReceptionState]=useState<'partial'|'received'>('received');
- useEffect(()=>{if(!auth)return;return onAuthStateChanged(auth,setUser);},[]);
+ useEffect(()=>{
+   if(!auth)return;
+   return onAuthStateChanged(auth,account=>{
+     setUser(account);
+     setShowroomAuthorized(false);
+     setShowroomData(null);
+     if(!account)setTab(current=>current==='showroom'?'compras':current);
+   });
+ },[]);
+ // Showroom credentials are verified independently from the Operations sandbox.
+ // The synthetic fixture never ships in the public Operations JavaScript bundle.
+ useEffect(()=>{
+   if(!user)return;
+   let active=true;
+   user.getIdToken().then(async token=>{
+     const response=await fetch('/api/operations/showroom',{
+       headers:{Authorization:'Bearer '+token},cache:'no-store'
+     });
+     if(!response.ok)throw new Error('SHOWROOM_FORBIDDEN');
+     const payload=await response.json() as {synthetic?:boolean;data?:OpsSnapshot};
+     if(payload.synthetic!==true||!payload.data)throw new Error('INVALID_SHOWROOM_RESPONSE');
+     return payload.data;
+   }).then(dataset=>{
+     if(!active)return;
+     setShowroomData(dataset);
+     setShowroomAuthorized(true);
+   }).catch(()=>{
+     if(!active)return;
+     setShowroomData(null);
+     setShowroomAuthorized(false);
+     setTab(current=>current==='showroom'?'compras':current);
+   });
+   return ()=>{active=false;};
+ },[user]);
  useEffect(()=>{
    if(mode!=='live'||!user)return;
    let cancelled=false;
@@ -291,7 +324,8 @@ export default function Operations(){
  }
  async function login(){if(!auth)throw new Error('Firebase Auth no está configurado.');await signInWithEmailAndPassword(auth,email,password);setPassword('');}
  const demoMode=mode==='demo';
- const selectedRows=tab==='showroom'?SHOWROOM_ONLY.purchases:purchases;
+ const showroomVisible=Boolean(user&&showroomAuthorized&&showroomData);
+ const selectedRows=tab==='showroom'&&showroomVisible?showroomData?.purchases??[]:purchases;
  const showStats=purchaseSummary(selectedRows);
  const currentTitle=demoMode?'DEMOSTRACIÓN EN MEMORIA · CATÁLOGOS VACÍOS':'OPERACIÓN CON AUTENTICACIÓN';
  return <div className="ops">
@@ -310,14 +344,17 @@ export default function Operations(){
     <div className="ops-toolbar-note">Los catálogos operativos se consultan desde Firestore por empresa. En Demo se crean en memoria y no quedan guardados.</div>
    </div>
    {!demoMode&&<div className="ops-auth">
-     {user?<div className="ops-flex"><span>Sesión: {user.email}</span><button onClick={()=>void work(()=>refreshLive())} disabled={busy}>Consultar empresas seleccionadas</button><button onClick={()=>{setSuperadminVerified(false);setData(EMPTY_OPS);setTab('compras');void signOut(auth!);}}>Salir</button></div>:
+     {user?<div className="ops-flex"><span>Sesión: {user.email}</span><button onClick={()=>void work(()=>refreshLive())} disabled={busy}>Consultar empresas seleccionadas</button><button onClick={()=>{setSuperadminVerified(false);setShowroomAuthorized(false);setShowroomData(null);setData(EMPTY_OPS);setTab('compras');void signOut(auth!);}}>Salir</button></div>:
       <div className="ops-auth-form"><strong>Acceso administrativo</strong><input aria-label="Correo" placeholder="Correo electrónico" type="email" value={email} onChange={e=>setEmail(e.target.value)}/>
        <input aria-label="Contraseña" placeholder="Contraseña" type="password" value={password} onChange={e=>setPassword(e.target.value)}/>
        <button disabled={busy||!email||!password} onClick={()=>void work(login)}>Iniciar sesión</button></div>}
      <p className="ops-hint">Para operaciones reales, el servidor exige <code>portal_users.opsSiteIds</code> y un proyecto Firebase autorizado. Preview nunca escribe en el Firestore productivo.</p>
    </div>}
    {msg&&<div className="ops-feedback" role="status">{msg}<button onClick={()=>setMsg('')}>×</button></div>}
-   <nav className="ops-tabs" aria-label="Operaciones">{tabs.filter(t=>t.id!=='datos'||(!demoMode&&user&&superadminVerified)).map(t=><button key={t.id} className={tab===t.id?'active':''} onClick={()=>setTab(t.id)}>{t.title}</button>)}</nav>
+   <nav className="ops-tabs" aria-label="Operaciones">{tabs.filter(t=>
+      t.id==='showroom'?showroomVisible:
+      t.id==='datos'?(!demoMode&&user&&superadminVerified):true
+    ).map(t=><button key={t.id} className={tab===t.id?'active':''} onClick={()=>setTab(t.id)}>{t.title}</button>)}</nav>
    {tab==='compras'&&<div className="ops-capture-layout">
     <section className="ops-card ops-purchase-form">
      <h2>Nueva compra</h2><p className="ops-hint">Registra el proveedor, importe, cómo se pagó y fotografía el ticket. El detalle de artículos se captura en Recepción.</p>
@@ -502,7 +539,7 @@ export default function Operations(){
      <p className="ops-hint">Las presentaciones se reutilizan al recibir mercancía; puedes crear nuevas sin duplicar el producto maestro.</p>
     </section>
    </div>}
-   {(tab==='kpis'||tab==='showroom')&&<section className="ops-card">
+   {(tab==='kpis'||(tab==='showroom'&&showroomVisible))&&<section className="ops-card">
      <div className="ops-section-title"><h2>{tab==='showroom'?'Showroom · datos sintéticos':'KPIs de Compras y Recepción'}</h2>
      <span className="ops-caption">{tab==='showroom'?'Ejemplo ilustrativo; no muestra clientes reales':(demoMode?'Solo datos creados durante esta sesión':'Datos autorizados de Firestore')}</span></div>
      <div className="ops-metrics"><div><small>Compras</small><strong>{showStats.count}</strong></div>
@@ -515,7 +552,7 @@ export default function Operations(){
       <div><strong>{p.supplierName}</strong><small>{p.siteId.toUpperCase()} · {cash(p.totalCents)}</small></div>
       <div className="ops-bar-track"><span style={{width:((p.totalCents/Math.max(1,...selectedRows.map(x=>x.totalCents)))*100)+'%'}}/></div>
      </div>)}</div>
-     <p className="ops-hint">Los porcentajes y montos agregados se calculan únicamente sobre las empresas seleccionadas y autorizadas. No representan inventario de recetas.</p>
+     <p className="ops-hint">{tab==='showroom'?'Vista sintética exclusiva de Superadmin. Se publicará por separado cuando exista su aplicación y su contrato de acceso.':'Los porcentajes y montos agregados se calculan únicamente sobre las empresas seleccionadas y autorizadas. No representan inventario de recetas.'}</p>
     </section>}
    {tab==='datos'&&!demoMode&&superadminVerified&&user&&<section className="ops-card">
     <h2>Exportación para Data Warehouse · Superadmin</h2>
