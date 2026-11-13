@@ -158,8 +158,8 @@ export async function POST(req:NextRequest){
   }
   if(action==='receipt.add'){
     const purchaseId=text(body.purchaseId,130),presentationId=text(body.presentationId,130),
-      packQuantity=Number(body.packQuantity),state=body.goodsStatus;
-    if(!Number.isFinite(packQuantity)||packQuantity<=0||packQuantity>100000||!['partial','received'].includes(String(state)))throw new Error('INVALID_RECEIPT');
+      packQuantity=Number(body.packQuantity),state=body.goodsStatus,lineTotalCents=body.lineTotalCents;
+    if(!Number.isFinite(packQuantity)||packQuantity<=0||packQuantity>100000||!['partial','received'].includes(String(state))||(lineTotalCents!==null&&lineTotalCents!==undefined&&!validMoneyCents(lineTotalCents,true)))throw new Error('INVALID_RECEIPT');
     const presentation=(await store.collection('ops_presentations').doc(presentationId).get()).data();
     if(!presentation||presentation.siteId!==site||presentation.active!==true)throw new Error('INVALID_PRESENTATION');
     const product=(await store.collection('ops_products').doc(presentation.productId).get()).data();
@@ -171,7 +171,7 @@ export async function POST(req:NextRequest){
       if(!purchase||purchase.siteId!==site)throw new Error('INVALID_PURCHASE');
       tx.create(receiptRef,{siteId:site,purchaseId,productId:presentation.productId,productName:product.name,presentationId,
         presentationLabel:presentation.label,packQuantity,receivedBaseAmount:Math.round(packQuantity*presentation.unitAmount*1e6)/1e6,
-        unit:presentation.unit,createdBy:actor,createdAt:now});
+        unit:presentation.unit,lineTotalCents:lineTotalCents??null,createdBy:actor,createdAt:now});
       tx.update(purchaseRef,{goodsStatus:state,receiptCount:FieldValue.increment(1),updatedAt:now});
       tx.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId,action:'receipt.added',receiptId:receiptRef.id,actor,createdAt:now});
     });
