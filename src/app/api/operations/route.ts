@@ -188,6 +188,35 @@ export async function POST(req:NextRequest){
     await batch.commit();
     return NextResponse.json({ok:true,id});
   }
+  if(action==='purchase.update'||action==='purchase.cancel'){
+    const id=text(body.purchaseId,130),ref=store.collection('ops_purchases').doc(id);
+    const found=await ref.get(),purchase=found.data();
+    if(!purchase||purchase.siteId!==site||purchase.cancelled===true)throw new Error('PURCHASE_NOT_FOUND_OR_CANCELLED');
+    const [payments,receipts,documents]=await Promise.all([
+      store.collection('ops_payments').where('purchaseId','==',id).limit(1).get(),
+      store.collection('ops_receipts').where('purchaseId','==',id).limit(1).get(),
+      store.collection('ops_documents').where('purchaseId','==',id).limit(1).get()
+    ]);
+    const hasLinked=!payments.empty||!receipts.empty||!documents.empty||purchase.receiptCount>0||purchase.documentCount>0;
+    if(action==='purchase.cancel'){
+      if(hasLinked||purchase.receiptDelivered||purchase.receiptAcknowledged)throw new Error('PURCHASE_HAS_LINKED_RECORDS_CANNOT_CANCEL');
+      const batch=store.batch();
+      batch.update(ref,{cancelled:true,cancelledAt:now,updatedAt:now,cancelReason:text(body.reason,300)});
+      batch.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId:id,action:'purchase.cancelled',actor,createdAt:now});
+      await batch.commit();return NextResponse.json({ok:true});
+    }
+    const date=body.purchaseDate,totalCents=body.totalCents,supplierId=text(body.supplierId,130);
+    if(!opsDate(date)||!validMoneyCents(totalCents))throw new Error('INVALID_PURCHASE');
+    if(hasLinked&&(purchase.totalCents!==totalCents||purchase.supplierId!==supplierId))throw new Error('PURCHASE_HAS_LINKED_RECORDS_FINANCIAL_FIELDS_LOCKED');
+    if(totalCents<purchase.paidCents)throw new Error('TOTAL_BELOW_PAYMENTS');
+    const supplier=(await store.collection('ops_suppliers').doc(supplierId).get()).data();
+    if(!supplier||supplier.siteId!==site)throw new Error('INVALID_SUPPLIER');
+    const balanceCents=totalCents-purchase.paidCents;
+    const batch=store.batch();
+    batch.update(ref,{purchaseDate:date,totalCents,balanceCents,supplierId,supplierName:supplier.name,notes:text(body.notes,600),updatedAt:now});
+    batch.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId:id,action:'purchase.updated',actor,createdAt:now});
+    await batch.commit();return NextResponse.json({ok:true});
+  }
   if(action==='payment.add'){
     const id=text(body.purchaseId,130),amount=body.amountCents,method=body.method,date=body.paidDate;
     if(!validMoneyCents(amount)||!opsDate(date)||!['cash','debit_card','credit_card','credit_note','card','transfer','other'].includes(String(method)))throw new Error('INVALID_PAYMENT');
