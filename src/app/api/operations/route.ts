@@ -141,6 +141,26 @@ export async function POST(req:NextRequest){
     await store.collection('ops_presentations').doc(id).create({siteId:site,productId,label,packCount,packUnit:unit,unitAmount,unit:product.unit,active:true,createdAt:now,updatedAt:now});
     return NextResponse.json({ok:true,id});
   }
+  if(action==='presentation.update'||action==='presentation.deactivate'||action==='presentation.delete'){
+    const id=text(body.presentationId,130),ref=store.collection('ops_presentations').doc(id);
+    const existing=(await ref.get()).data();
+    if(!existing||existing.siteId!==site)throw new Error('PRESENTATION_NOT_FOUND');
+    const linked=await store.collection('ops_receipts').where('presentationId','==',id).limit(1).get();
+    if(action==='presentation.delete'){
+      if(!linked.empty)throw new Error('PRESENTATION_IN_USE_DEACTIVATE_INSTEAD');
+      await ref.delete();return NextResponse.json({ok:true});
+    }
+    if(action==='presentation.deactivate'){
+      await ref.update({active:false,updatedAt:now});return NextResponse.json({ok:true});
+    }
+    if(!linked.empty)throw new Error('PRESENTATION_IN_USE_CREATE_NEW_INSTEAD');
+    const label=text(body.label,100),unit=body.packUnit,packCount=Number(body.packCount);
+    if(invalid(label)||!OPS_UNITS.some(u=>u===unit)||!Number.isFinite(packCount)||packCount<=0||packCount>100000)throw new Error('INVALID_PRESENTATION');
+    const product=(await store.collection('ops_products').doc(existing.productId).get()).data();
+    if(!product||product.siteId!==site||product.unit!==normalUnit(unit as typeof OPS_UNITS[number])||(!Number.isInteger(packCount)&&measureOf(unit as typeof OPS_UNITS[number])==='count'))throw new Error('INVALID_PRESENTATION');
+    await ref.update({label,packCount,packUnit:unit,unitAmount:baseAmount(packCount,unit as typeof OPS_UNITS[number]),updatedAt:now});
+    return NextResponse.json({ok:true});
+  }
   if(action==='purchase.add'){
     const supplierId=text(body.supplierId,130),totalCents=body.totalCents,date=body.purchaseDate,termsDays=body.termsDays===null||body.termsDays===undefined||body.termsDays===''?null:Number(body.termsDays);
     const payments=Array.isArray(body.initialPayments)?body.initialPayments:[];
