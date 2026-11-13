@@ -55,7 +55,7 @@ export async function POST(req:NextRequest){
   const documentId=site+'_'+randomUUID();
   const ext=mime==='image/jpeg'?'jpg':mime==='image/png'?'png':'webp';
   // Organize documents as: company / purchase tickets / order date / order folio / receipt.
-  // Purchases without an order are kept under the dated "sin-orden" folder.
+  // Purchases without an order have receipt files directly under the date folder.
   const orderId=typeof purchase.orderId==='string'?purchase.orderId:'';
   const order=orderId?(await store.collection('ops_orders').doc(orderId).get()).data():null;
   if(orderId&&!order)throw new Error('PURCHASE_ORDER_NOT_FOUND');
@@ -72,7 +72,7 @@ export async function POST(req:NextRequest){
   if(!folderDate||!validDate(folderDate))throw new Error('INVALID_PURCHASE_DATE');
   const purchaseFolio=typeof purchase.folio==='string'&&/^[A-Z0-9-]{1,80}$/.test(purchase.folio)?purchase.folio:purchaseId;
   // Each image retains the purchase folio plus a unique document ID to avoid overwrites.
-  const storagePath=[site.toUpperCase(),'tickets-de-compra',folderDate,orderFolio??'sin-orden',purchaseFolio+'_'+documentId+'.'+ext].join('/');
+  const storagePath=[site.toUpperCase(),'tickets-de-compra',folderDate,...(orderFolio?[orderFolio]:[]),purchaseFolio+'_'+documentId+'.'+ext].join('/');
   const object=bucket.file(storagePath);
   await object.save(buffer,{resumable:false,metadata:{contentType:mime,cacheControl:'private,no-store',metadata:{sha256:createHash('sha256').update(buffer).digest('hex')}}});
   try{
