@@ -39,7 +39,7 @@ export type OpsPurchase={
  receiptCount:number;documentCount:number;receiptDelivered:boolean;receiptAcknowledged:boolean;notes:string;createdAt?:unknown;
 };
 export type OpsPayment={id:string;siteId:OpsSite;purchaseId:string;amountCents:number;method:'cash'|'debit_card'|'credit_card'|'credit_note'|'card'|'transfer'|'other';reference?:string;reconciliationStatus:'not_applicable'|'pending';paidDate:string};
-export type OpsReceipt={id:string;siteId:OpsSite;purchaseId:string;productId:string;productName:string;presentationId:string;presentationLabel:string;packQuantity:number;receivedBaseAmount:number;unit:'kg'|'l'|'unit';createdAt?:unknown};
+export type OpsReceipt={id:string;siteId:OpsSite;purchaseId:string;productId:string;productName:string;presentationId:string;presentationLabel:string;packQuantity:number;receivedBaseAmount:number;unit:'kg'|'l'|'unit';lineTotalCents?:number|null;createdAt?:unknown};
 export type OpsDocument={id:string;siteId:OpsSite;purchaseId:string;storagePath:string;mime:string;size:number;createdAt?:unknown};
 export type OpsSnapshot={products:OpsProduct[];suppliers:OpsSupplier[];presentations:OpsPresentation[];purchases:OpsPurchase[];payments:OpsPayment[];receipts:OpsReceipt[];documents:OpsDocument[]};
 export const EMPTY_OPS:OpsSnapshot={products:[],suppliers:[],presentations:[],purchases:[],payments:[],receipts:[],documents:[]};
