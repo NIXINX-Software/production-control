@@ -102,9 +102,10 @@ export default function Operations(){
    if(!resp.ok||!result.data)throw new Error(id.toUpperCase()+': '+(result.error||String(resp.status)));
    return result.data;
   }));
-  const merge=<K extends keyof OpsSnapshot>(key:K):OpsSnapshot[K]=>requests.reduce<OpsSnapshot[K]>((rows,item)=>[...rows,...item[key]] as OpsSnapshot[K],[] as unknown as OpsSnapshot[K]);
-  setData({products:merge('products'),suppliers:merge('suppliers'),presentations:merge('presentations'),
-   purchases:merge('purchases'),payments:merge('payments'),receipts:merge('receipts'),documents:merge('documents')});
+  setData({products:requests.flatMap(d=>d.products),suppliers:requests.flatMap(d=>d.suppliers),
+    presentations:requests.flatMap(d=>d.presentations),purchases:requests.flatMap(d=>d.purchases),
+    payments:requests.flatMap(d=>d.payments),receipts:requests.flatMap(d=>d.receipts),
+    documents:requests.flatMap(d=>d.documents)});
  }
  async function work(job:()=>Promise<void>){setBusy(true);setMsg('');try{await job();setMsg('Operación completada.');}
   catch(e){setMsg('No se completó: '+(e instanceof Error?e.message:String(e)));}finally{setBusy(false);}}
