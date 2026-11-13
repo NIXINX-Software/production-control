@@ -20,7 +20,7 @@ export type OpsOrder={
 };
 export type OpsCostReportRow={
  productId:string;productName:string;unit:'kg'|'l'|'unit';
- quantity:number;amountCents:number;avgCostCents:number;lines:number;
+ quantity:number;amountCents:number;avgCostCents:number|null;lines:number;unpricedLines:number;
 };
 export function orderEstimate(lines:Pick<OpsOrderLine,'estimateCents'>[]):number|null{
  return lines.length&&lines.every(l=>l.estimateCents!==null)?
