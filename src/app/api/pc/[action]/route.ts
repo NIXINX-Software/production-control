@@ -1,6 +1,5 @@
 import {NextRequest, NextResponse} from 'next/server';
 import {FieldValue} from 'firebase-admin/firestore';
-import {requireWorkspaceIdentity,ensureWorkspaceSite} from '@/lib/workspace-access';
 import {isPCUnit} from '@/lib/pc-units';
 import {buildManagementData} from '@/lib/pc-kpis-server';
 import {presentation,asKg,isPackUnit,validPartial,productQuantity} from '@/lib/pc-presentation';
@@ -13,7 +12,6 @@ import {
   requireSameOrigin,
   requireCorrectionCode,
   requireSuperAdmin,
-  requireOperationalViewer,
   safeSite,
   stamp,
   text,
@@ -29,7 +27,7 @@ const number=(v:unknown)=>typeof v==='number'?v:Number(v);
 
 function respond(error:unknown){
  const message=error instanceof Error?error.message:'SERVER_ERROR';
- const status=message==='ADMIN_AUTH_REQUIRED'||message==='CORRECTION_AUTH_REQUIRED'?401:message==='SUPERADMIN_REQUIRED'||message==='ADMIN_ROLE_REQUIRED'||message==='WORKSPACE_FORBIDDEN'||message==='WORKSPACE_SITE_FORBIDDEN'||message==='FORBIDDEN'?403:message==='CONFLICT'?409:(message.startsWith('Missing server')||message==='CORRECTION_CODE_NOT_CONFIGURED')?503:message==='SERVER_ERROR'?500:400;
+ const status=message==='ADMIN_AUTH_REQUIRED'||message==='CORRECTION_AUTH_REQUIRED'?401:message==='SUPERADMIN_REQUIRED'||message==='ADMIN_ROLE_REQUIRED'||message==='FORBIDDEN'?403:message==='CONFLICT'?409:(message.startsWith('Missing server')||message==='CORRECTION_CODE_NOT_CONFIGURED')?503:message==='SERVER_ERROR'?500:400;
  console.error('PC API:',message);
  return NextResponse.json({error:message},{status});
 }
@@ -57,15 +55,6 @@ export async function GET(req:NextRequest,context:Context){try{
  const to=p.get('to')??operationalToday();
  const from=p.get('from')??new Date(Date.parse(to+'T12:00:00Z')-13*86400000).toISOString().slice(0,10);
  if(!safeSite(site)||!validDate(from)||!validDate(to)||from>to||Date.parse(to+'T12:00:00Z')-Date.parse(from+'T12:00:00Z')>90*86400000)throw new Error('INVALID_HISTORY_PERIOD');
- // Check site authorization before reading the operational snapshot.
- try{
-  const identity=await requireWorkspaceIdentity(req,['kitchen','admin']);
-  ensureWorkspaceSite(identity,site,'pc');
- }catch(e){
-  // Preserve the existing dedicated read-only viewer route.
-  if(!(e instanceof Error)||e.message!=='WORKSPACE_FORBIDDEN')throw e;
-  await requireOperationalViewer(req);
- }
  const store=db();
  const between=(collection:string)=>store.collection(collection).where('operationalDate','>=',from).where('operationalDate','<=',to).get();
  const [pr,pe,co,ba,ac,inp,mov,openBatches]=await Promise.all([
@@ -96,8 +85,6 @@ export async function POST(req:NextRequest,context:Context){try{
  const {action}=await context.params;
   requireSameOrigin(req);
  const payload=await req.json() as Record<string,unknown>;
- const identity=await requireWorkspaceIdentity(req,['kitchen','admin']);
- if(payload.siteId!==undefined)ensureWorkspaceSite(identity,payload.siteId,'pc');
  const store=db();
  if(action==='catalog'){
   const kind=payload.kind, name=text(payload.name), sites=payload.siteIds;
@@ -210,7 +197,6 @@ export async function POST(req:NextRequest,context:Context){try{
   const ref=store.collection('pc_counts').doc(id);
   const before=await ref.get(),existing=before.data();
   if(!existing||!safeSite(existing.siteId)||!Array.isArray(existing.lines))throw new Error('INVALID_COUNT');
-  ensureWorkspaceSite(identity,existing.siteId,'pc');
   const employee=await findEmployee(payload.employeeId,existing.siteId);
   const rows=payload.lines;
   if(!Array.isArray(rows)||rows.length!==existing.lines.length)throw new Error('INVALID_COUNT');
@@ -242,7 +228,6 @@ export async function POST(req:NextRequest,context:Context){try{
   if(!id||reason.length<5||!Number.isFinite(qty)||qty<=0||qty>100000||!isPCUnit(unit))throw new Error('INVALID_CORRECTION');
   const ref=store.collection('pc_inputs').doc(id),before=await ref.get(),old=before.data();
   if(!old||!safeSite(old.siteId))throw new Error('INVALID_INPUT');
-  ensureWorkspaceSite(identity,old.siteId,'pc');
   const employee=await findEmployee(payload.employeeId,old.siteId);
   if(old.quantity===qty&&old.unit===unit)throw new Error('NO_CHANGES');
   const revision=ref.collection('revisions').doc();
@@ -261,7 +246,6 @@ export async function POST(req:NextRequest,context:Context){try{
   if(!id||reason.length<5)throw new Error('INVALID_CORRECTION');
   const ref=store.collection('pc_batches').doc(id),before=await ref.get(),old=before.data();
   if(!old||old.status!=='completed'||!safeSite(old.siteId))throw new Error('INVALID_BATCH');
-  ensureWorkspaceSite(identity,old.siteId,'pc');
   const employee=await findEmployee(payload.employeeId,old.siteId);
   const pack=presentation({bagSize:old.bagSizeSnapshot,bagUnit:old.bagUnitSnapshot,bagWeightKg:old.bagWeightKgSnapshot});
   if(pack.bagSize<=0)throw new Error('INVALID_CORRECTION');
@@ -303,7 +287,6 @@ export async function POST(req:NextRequest,context:Context){try{
    if(!batchId||!workEmployeeId||!reason)throw new Error('INVALID_CORRECTION');
    const batch=await store.collection('pc_batches').doc(batchId).get(),value=batch.data();
    if(!value||!safeSite(value.siteId)||!['active','completed'].includes(value.status))throw new Error('INVALID_BATCH');
-  ensureWorkspaceSite(identity,value.siteId,'pc');
    const site=value.siteId as Site;
    const worker=await findEmployee(workEmployeeId,site),corrector=await findEmployee(payload.employeeId,site);
    const incoming=payload.intervals,original=payload.originalIntervals;
@@ -342,7 +325,6 @@ export async function POST(req:NextRequest,context:Context){try{
   const batchId=text(payload.batchId,80),ref=store.collection('pc_batches').doc(batchId);
   const snap=await ref.get(),b=snap.data();
   if(!b||b.status!=='active'||!safeSite(b.siteId))throw new Error('INVALID_BATCH');
-  ensureWorkspaceSite(identity,b.siteId,'pc');
   const site=b.siteId as Site;
   const employee=await findEmployee(payload.employeeId,site);
   if(action==='start'||action==='pause'){
