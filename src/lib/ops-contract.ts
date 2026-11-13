@@ -36,9 +36,9 @@ export type OpsPurchase={
  id:string;siteId:OpsSite;purchaseDate:string;supplierId:string;supplierName:string;totalCents:number;currency:'CAD';
  paidCents:number;balanceCents:number;dueDate:string|null;goodsStatus:'pending'|'partial'|'received'|'verified'|'discrepancy';
  documentStatus:'missing'|'captured'|'delivered'|'received'|'rejected';bankStatus:'awaiting_payment'|'pending_reconciliation'|'not_applicable';
- receiptCount:number;documentCount:number;notes:string;createdAt?:unknown;
+ receiptCount:number;documentCount:number;receiptDelivered:boolean;receiptAcknowledged:boolean;notes:string;createdAt?:unknown;
 };
-export type OpsPayment={id:string;siteId:OpsSite;purchaseId:string;amountCents:number;method:'cash'|'card'|'transfer'|'other';reconciliationStatus:'not_applicable'|'pending';paidDate:string};
+export type OpsPayment={id:string;siteId:OpsSite;purchaseId:string;amountCents:number;method:'cash'|'debit_card'|'credit_card'|'credit_note'|'card'|'transfer'|'other';reference?:string;reconciliationStatus:'not_applicable'|'pending';paidDate:string};
 export type OpsReceipt={id:string;siteId:OpsSite;purchaseId:string;productId:string;productName:string;presentationId:string;presentationLabel:string;packQuantity:number;receivedBaseAmount:number;unit:'kg'|'l'|'unit';createdAt?:unknown};
 export type OpsDocument={id:string;siteId:OpsSite;purchaseId:string;storagePath:string;mime:string;size:number;createdAt?:unknown};
 export type OpsSnapshot={products:OpsProduct[];suppliers:OpsSupplier[];presentations:OpsPresentation[];purchases:OpsPurchase[];payments:OpsPayment[];receipts:OpsReceipt[];documents:OpsDocument[]};
@@ -50,11 +50,11 @@ export function purchaseBalances(totalCents:number,amounts:number[]) {
   return {paidCents,balanceCents:totalCents-paidCents};
 }
 export function bankStatusForPayments(methods:OpsPayment['method'][]):OpsPurchase['bankStatus']{
-  return methods.some(m=>m==='card'||m==='transfer')?'pending_reconciliation':methods.length?'not_applicable':'awaiting_payment';
+  return methods.some(m=>['card','debit_card','credit_card','transfer','other'].includes(m))?'pending_reconciliation':methods.length?'not_applicable':'awaiting_payment';
 }
 export function purchaseSummary(rows:OpsPurchase[]) {
   return rows.reduce((a,p)=>({
     count:a.count+1,totalCents:a.totalCents+p.totalCents,balanceCents:a.balanceCents+p.balanceCents,
-    pendingGoods:a.pendingGoods+(p.goodsStatus==='verified'?0:1),pendingDocuments:a.pendingDocuments+(p.documentStatus==='received'?0:1)
+    pendingGoods:a.pendingGoods+(p.goodsStatus==='verified'?0:1),pendingDocuments:a.pendingDocuments+(p.receiptAcknowledged===true?0:1)
   }),{count:0,totalCents:0,balanceCents:0,pendingGoods:0,pendingDocuments:0});
 }
