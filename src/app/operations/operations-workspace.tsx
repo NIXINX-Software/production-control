@@ -131,7 +131,9 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
    }).catch(err=>{
      if(cancelled)return;
      setSuperadminVerified(false);setData(EMPTY_OPS);
-     setMsg('No se pudieron cargar los catálogos de Firestore: '+(err instanceof Error?err.message:'error desconocido'));
+     if(workspace!=='admin'&&err instanceof Error&&err.message.includes('OPS_PREVIEW_DISABLED')){
+       setMode('demo');setMsg('Preview aislado: puedes probar el formulario en memoria; nada se guardará en Firestore.');
+     }else setMsg('No se pudieron cargar los catálogos de Firestore: '+(err instanceof Error?err.message:'error desconocido'));
    });
    return ()=>{cancelled=true;};
  },[mode,user,site,workspace,workspaceAuthorized]);
