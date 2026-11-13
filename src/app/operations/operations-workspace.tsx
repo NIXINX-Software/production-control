@@ -3,6 +3,7 @@ import {useEffect,useMemo,useState} from 'react';
 import Link from 'next/link';
 import {onAuthStateChanged,signInWithEmailAndPassword,signOut,type User} from 'firebase/auth';
 import {auth} from '@/lib/firebase';
+import {PC_UNITS} from '@/lib/pc-units';
 import {baseAmount,bankStatusForPayments,EMPTY_OPS,normalUnit,purchaseBalances,purchaseSummary,
  type OpsSite,type OpsUnit,type OpsSnapshot,type OpsPurchase,type OpsPayment,type OpsPresentation} from '@/lib/ops-contract';
 import './operations.css';
@@ -16,7 +17,7 @@ const SITES:{id:OpsSite;name:string}[]=[{id:'htl',name:'Hot Tacos Leamington'},{
 const dateToday=()=>new Date().toLocaleDateString('en-CA',{timeZone:'America/Toronto'});
 const cash=(cents:number)=>new Intl.NumberFormat('en-CA',{style:'currency',currency:'CAD'}).format(cents/100);
 const genId=(s:OpsSite)=>s+'_'+crypto.randomUUID();
-const uLabel:Record<OpsUnit,string>={kg:'kg',g:'g',lb:'lb',l:'L',ml:'mL',unit:'pzas',portion:'porciones'};
+const uLabel:Record<OpsUnit,string>=Object.fromEntries(PC_UNITS.map(u=>[u.id,u.es])) as Record<OpsUnit,string>;
 const tabs:{id:Panel;title:string}[]=[{id:'compras',title:'Compras'},{id:'recepcion',title:'Recepción'},{id:'conciliacion',title:'Conciliación'},{id:'catalogos',title:'Catálogos'},
  {id:'kpis',title:'KPIs'},{id:'showroom',title:'Showroom'},{id:'datos',title:'Datos / DWH'}];
 const filterSite=(data:OpsSnapshot,siteId:OpsSite):OpsSnapshot=>({
@@ -136,7 +137,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  const selected=data.purchases.find(p=>p.id===selection&&p.siteId===site);
  const supplier=active.suppliers.find(x=>x.id===supplierId);
  const presentationProductObj=active.products.find(x=>x.id===presentationProduct);
- const eligibleUnits=(['kg','g','lb','l','ml','unit','portion'] as OpsUnit[]).filter(u=>presentationProductObj&&normalUnit(u)===presentationProductObj.unit);
+ const eligibleUnits=PC_UNITS.map(u=>u.id).filter(u=>presentationProductObj&&normalUnit(u)===presentationProductObj.unit);
  const currentPresentation=active.presentations.find(x=>x.id===receivingPresentation&&x.productId===receivingProduct);
  const receivingProductObj=active.products.find(x=>x.id===receivingProduct);
  const receivingPresentations=active.presentations.filter(x=>x.productId===receivingProduct&&x.active);
@@ -491,7 +492,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
       <h3>Agregar presentación a {receivingProductObj.name}</h3>
       <label>Descripción<input placeholder="Ej. Bolsa 750 g" value={newPresentationLabel} onChange={e=>setNewPresentationLabel(e.target.value)}/></label>
       <div className="ops-grid-2"><label>Contenido por paquete<input type="number" step="any" min="0.001" value={packCount} onChange={e=>setPackCount(e.target.value)}/></label>
-       <label>Unidad<select value={packUnit} onChange={e=>setPackUnit(e.target.value as OpsUnit)}>{(['kg','g','lb','l','ml','unit','portion'] as OpsUnit[]).filter(u=>normalUnit(u)===receivingProductObj.unit).map(u=><option key={u} value={u}>{uLabel[u]}</option>)}</select></label></div>
+       <label>Unidad<select value={packUnit} onChange={e=>setPackUnit(e.target.value as OpsUnit)}>{PC_UNITS.map(u=>u.id).filter(u=>normalUnit(u)===receivingProductObj.unit).map(u=><option key={u} value={u}>{uLabel[u]}</option>)}</select></label></div>
       <button type="button" disabled={busy||!newPresentationLabel.trim()} onClick={()=>void work(addPresentation)}>Guardar y utilizar presentación</button>
      </div>}
      <div className="ops-divider"/>
