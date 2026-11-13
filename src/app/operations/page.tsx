@@ -82,7 +82,7 @@ export default function Operations(){
  const [terms,setTerms]=useState('30'),[tenders,setTenders]=useState<Tender[]>([]),[notes,setNotes]=useState('');
  const [receiptDeliveredAtPurchase,setReceiptDeliveredAtPurchase]=useState(false),[inlineNewProduct,setInlineNewProduct]=useState(false),[inlineNewPresentation,setInlineNewPresentation]=useState(false);
  const [payAmount,setPayAmount]=useState(''),[payMethod,setPayMethod]=useState<OpsPayment['method']>('transfer');
- const [recipient,setRecipient]=useState(''),[verifier,setVerifier]=useState(''),[evidence,setEvidence]=useState<File|null>(null);
+ const [recipient,setRecipient]=useState(''),[verifier,setVerifier]=useState(''),[evidence,setEvidence]=useState<File|null>(null),[existingEvidence,setExistingEvidence]=useState<File|null>(null);
  const [newSupplier,setNewSupplier]=useState(''),[newProduct,setNewProduct]=useState(''),[productUnit,setProductUnit]=useState<'kg'|'l'|'unit'>('kg');
  const [presentationProduct,setPresentationProduct]=useState('htl_feta'),[newPresentationLabel,setNewPresentationLabel]=useState('');
  const [packCount,setPackCount]=useState('750'),[packUnit,setPackUnit]=useState<OpsUnit>('g');
@@ -138,8 +138,8 @@ export default function Operations(){
  }
  async function addProduct(){
   if(newProduct.trim().length<2)throw new Error('Escribe el nombre del producto.');
-  if(mode==='live'){const r=await request('product.add',{name:newProduct,unit:productUnit});await refreshLive();if(r.id){setPresentationProduct(r.id);setReceivingProduct(r.id);setReceivingPresentation('');}}
-  else{const id=genId(site);setData(d=>({...d,products:[...d.products,{id,siteId:site,name:newProduct.trim(),unit:productUnit,active:true}]}));setPresentationProduct(id);setReceivingProduct(id);setReceivingPresentation('');}
+  if(mode==='live'){const r=await request('product.add',{name:newProduct,unit:productUnit});await refreshLive();if(r.id){setPresentationProduct(r.id);setReceivingProduct(r.id);setReceivingPresentation('');setPackUnit(productUnit);}}
+  else{const id=genId(site);setData(d=>({...d,products:[...d.products,{id,siteId:site,name:newProduct.trim(),unit:productUnit,active:true}]}));setPresentationProduct(id);setReceivingProduct(id);setReceivingPresentation('');setPackUnit(productUnit);}
   setNewProduct('');setInlineNewProduct(false);
  }
  async function addPresentation(){
@@ -252,8 +252,8 @@ export default function Operations(){
   }
  }
  async function uploadFile(){
-  if(!selected||!evidence)throw new Error('Selecciona una imagen y una compra.');
-  await uploadFileFor(selected.id,evidence);setEvidence(null);
+  if(!selected||!existingEvidence)throw new Error('Selecciona una imagen y una compra.');
+  await uploadFileFor(selected.id,existingEvidence);setExistingEvidence(null);
  }
  async function changeDocument(next:'delivered'|'received'|'rejected',purchase:OpsPurchase|undefined=selected){
   if(!purchase)throw new Error('Selecciona una compra.');
@@ -268,7 +268,7 @@ export default function Operations(){
  const currentTitle=demoMode?'DEMOSTRACIÓN — NO GUARDA EN FIRESTORE':'OPERACIÓN CON AUTENTICACIÓN';
  return <div className="ops">
   <header className="ops-header"><div className="ops-header-inner">
-   <div><Link href="/" className="ops-back">← Production Control</Link><h1>NIXINX <span>Operations</span></h1></div>
+   <div><Link href="/" className="ops-back">← Production Control</Link><h1>Business Transformation <span>· Operaciones</span></h1></div>
    <div className="ops-header-right"><span className="ops-status">{currentTitle}</span>
     <select aria-label="Modo de información" value={mode} onChange={e=>{setMode(e.target.value as ViewMode);setData(e.target.value==='demo'?initial:EMPTY_OPS);setMsg('');}}>
       <option value="demo">Demo segura</option><option value="live">Firestore autorizado</option></select>
@@ -291,56 +291,52 @@ export default function Operations(){
    {msg&&<div className="ops-feedback" role="status">{msg}<button onClick={()=>setMsg('')}>×</button></div>}
    <nav className="ops-tabs" aria-label="NIXINX Operations">{tabs.map(t=><button key={t.id} className={tab===t.id?'active':''} onClick={()=>setTab(t.id)}>{t.title}</button>)}</nav>
    {tab==='compras'&&<div className="ops-layout">
-    <section className="ops-card">
-     <h2>Registrar compra</h2><p className="ops-hint">Compra rápida. Los productos se detallan cuando llega la mercancía.</p>
+    <section className="ops-card ops-purchase-form">
+     <h2>Nueva compra</h2><p className="ops-hint">Registra el proveedor, importe, cómo se pagó y fotografía el ticket. El detalle de artículos se captura en Recepción.</p>
      <label>Proveedor<select value={supplierId} onChange={e=>setSupplierId(e.target.value)}><option value="">Seleccionar proveedor</option>
        {active.suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
      <div className="ops-grid-2"><label>Fecha<input type="date" value={purchaseDate} onChange={e=>setPurchaseDate(e.target.value)}/></label>
-      <label>Total (CAD)<input type="number" min="0.01" step="0.01" value={total} onChange={e=>setTotal(e.target.value)}/></label></div>
-     <div className="ops-grid-2"><label>Pago inicial (CAD)<input type="number" min="0" step="0.01" value={initialPay} onChange={e=>setInitialPay(e.target.value)}/></label>
-      <label>Medio del pago inicial<select value={initialMethod} onChange={e=>setInitialMethod(e.target.value as OpsPayment['method'])}>
-       <option value="card">Tarjeta</option><option value="transfer">Transferencia</option><option value="cash">Efectivo</option><option value="other">Otro</option></select></label></div>
-     <label>Plazo del saldo a crédito (días)<input type="number" min="0" max="365" step="1" value={terms} onChange={e=>setTerms(e.target.value)}/></label>
-     <label>Observaciones<textarea rows={2} value={notes} onChange={e=>setNotes(e.target.value)}/></label>
-     <button className="ops-primary" disabled={busy||!supplierId} onClick={()=>void work(addPurchase)}>Guardar compra</button>
-     <p className="ops-hint">Si el pago inicial es $0, se genera una obligación por pagar. El crédito NO genera una conciliación bancaria ficticia.</p>
+      <label>Total de la compra (CAD)<input type="number" min="0.01" step="0.01" inputMode="decimal" value={total} onChange={e=>setTotal(e.target.value)}/></label></div>
+     <div className="ops-payments-title"><h3>¿Cómo se pagó?</h3><button type="button" onClick={()=>setTenders(p=>[...p,{id:crypto.randomUUID(),method:'cash',amount:'',reference:''}])}>+ Agregar medio de pago</button></div>
+     {tenders.length===0&&<p className="ops-hint">Si se compró completamente a crédito, deja esta sección vacía. Podrás registrar el pago cuando se liquide la deuda.</p>}
+     <div className="ops-tender-rows">{tenders.map((p,i)=><div key={p.id} className="ops-tender">
+      <div className="ops-tender-heading"><strong>Pago {i+1}</strong><button type="button" aria-label={"Eliminar pago "+(i+1)} onClick={()=>setTenders(rows=>rows.filter(x=>x.id!==p.id))}>Eliminar</button></div>
+      <div className="ops-grid-2"><label>Medio<select value={p.method} onChange={e=>setTenders(rows=>rows.map(x=>x.id===p.id?{...x,method:e.target.value as OpsPayment['method']}:x))}>
+       {tenderMethods.map(m=><option key={m.value} value={m.value}>{m.label}</option>)}</select></label>
+       <label>Importe (CAD)<input type="number" min="0.01" step="0.01" inputMode="decimal" placeholder="0.00" value={p.amount} onChange={e=>setTenders(rows=>rows.map(x=>x.id===p.id?{...x,amount:e.target.value}:x))}/></label></div>
+      <label>Referencia / nota (opcional)<input placeholder="Ej. tarjeta terminación 1234" value={p.reference} onChange={e=>setTenders(rows=>rows.map(x=>x.id===p.id?{...x,reference:e.target.value}:x))}/></label>
+     </div>)}</div>
+     <div className="ops-payment-summary"><div><span>Total</span><strong>{Number.isFinite(draftCents)?cash(draftCents):'—'}</strong></div>
+      <div><span>Pagos / notas aplicadas</span><strong>{Number.isFinite(tenderTotalCents)?cash(tenderTotalCents):'—'}</strong></div>
+      <div><span>Saldo a crédito</span><strong>{Number.isFinite(draftBalance)?cash(draftBalance):'—'}</strong></div></div>
+     {draftBalance>0&&<label>Plazo de pago (días)<input type="number" min="0" max="365" step="1" value={terms} onChange={e=>setTerms(e.target.value)}/></label>}
+     {draftBalance<0&&<p className="ops-error">Los pagos no pueden superar el total de la compra.</p>}
+     <div className="ops-receipt-picker">
+      <h3>Fotografía del ticket o factura</h3>
+      <label className="ops-photo-label">📷 Tomar foto o seleccionar imagen<input type="file" accept="image/jpeg,image/png,image/webp,image/*" capture="environment" onChange={e=>setEvidence(e.target.files?.[0]??null)}/></label>
+      {evidence?<p className="ops-hint">✓ {evidence.name} ({(evidence.size/1024/1024).toFixed(1)} MB). Se reducirá a JPEG, máximo 1600 px antes de subir a Firebase Storage.</p>
+        :<p className="ops-hint">Puedes guardar pendiente de comprobante, pero para marcarlo entregado primero debes adjuntar la imagen.</p>}
+      <label className="ops-inline-check"><input type="checkbox" checked={receiptDeliveredAtPurchase} onChange={e=>setReceiptDeliveredAtPurchase(e.target.checked)}/> Ya entregué el comprobante</label>
+     </div>
+     <label>Observaciones (opcional)<textarea rows={2} placeholder="Comentarios de la compra" value={notes} onChange={e=>setNotes(e.target.value)}/></label>
+     <button className="ops-primary" disabled={busy||!supplierId||!Number.isFinite(draftBalance)||draftBalance<0||draftCents<1} onClick={()=>void work(addPurchase)}>{busy?'Guardando…':'Guardar compra'}</button>
     </section>
-    <section className="ops-card">
-     <h2>Compras registradas <span className="ops-count">{active.purchases.length}</span></h2>
+    <section className="ops-card ops-purchases-panel">
+     <div className="ops-section-title"><h2>Compras registradas</h2><span className="ops-count">{active.purchases.length}</span></div>
+     <p className="ops-hint">Selecciona una compra para consultar su recibo. La recepción de artículos y la conciliación se hacen en sus propias pestañas.</p>
      <div className="ops-list">{active.purchases.map(p=><button key={p.id} className={'ops-purchase '+(selected?.id===p.id?'selected':'')} onClick={()=>setSelection(p.id)}>
-      <span><strong>{p.supplierName}</strong><small>{p.purchaseDate} · {p.id.slice(0,19)}</small></span>
-      <span className="ops-purchase-amount"><strong>{cash(p.totalCents)}</strong><small>Saldo {cash(p.balanceCents)}</small></span>
+       <span><strong>{p.supplierName}</strong><small>{p.purchaseDate} · {p.id.slice(0,16)}</small></span>
+       <span className="ops-purchase-amount"><strong>{cash(p.totalCents)}</strong><small>{p.balanceCents>0?'Crédito '+cash(p.balanceCents):'Pagado'}</small></span>
      </button>)}</div>
-     {!active.purchases.length&&<p className="ops-hint">Sin compras registradas para esta empresa.</p>}
-     {selected&&<div className="ops-detail">
-      <h3>Expediente de compra</h3>
-      <div className="ops-grid-2">
-       <div className="ops-state"><small>Mercancía</small><strong>{status(selected.goodsStatus)}</strong></div>
-       <div className="ops-state"><small>Comprobante</small><strong>{status(selected.documentStatus)}</strong></div>
-       <div className="ops-state"><small>Cuenta por pagar</small><strong>{cash(selected.balanceCents)}</strong></div>
-       <div className="ops-state"><small>Banco</small><strong>{status(selected.bankStatus)}</strong></div>
-      </div>
-      <div className="ops-divider"/>
-      <h3>Registrar abono a la compra</h3>
-      <div className="ops-grid-2"><label>Importe del abono<input type="number" min="0.01" step="0.01" value={payAmount} onChange={e=>setPayAmount(e.target.value)}/></label>
-       <label>Medio<select value={payMethod} onChange={e=>setPayMethod(e.target.value as OpsPayment['method'])}>
-        <option value="transfer">Transferencia</option><option value="card">Tarjeta</option><option value="cash">Efectivo</option><option value="other">Otro</option></select></label></div>
-      <button disabled={busy||selected.balanceCents===0} onClick={()=>void work(addPayment)}>Aplicar abono</button>
-      <div className="ops-mini-list">{associated.map(p=><div key={p.id}>{cash(p.amountCents)} · {p.method} <small>{p.reconciliationStatus==='pending'?'Conciliación pendiente':'Sin conciliación bancaria'}</small></div>)}</div>
-      <div className="ops-divider"/>
-      <h3>Comprobante y entrega / recepción</h3>
-      <label>Fotografía del ticket o factura<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>setEvidence(e.target.files?.[0]??null)}/></label>
-      <button disabled={busy||!evidence} onClick={()=>void work(uploadFile)}>Adjuntar imagen</button>
-      <p className="ops-hint">{selected.documentCount} evidencia(s) registradas. Imagen privada en Firebase Storage únicamente en modo conectado.</p>
+     {!active.purchases.length&&<p className="ops-hint">Aún no hay compras para esta empresa.</p>}
+     {selected&&<div className="ops-compact-status">
+      <h3>Seguimiento · {selected.supplierName}</h3>
+      <label className="ops-inline-check"><input type="checkbox" checked={selected.receiptDelivered===true||selected.documentStatus==='delivered'||selected.documentStatus==='received'} disabled={busy||selected.documentCount===0||selected.receiptDelivered===true||selected.documentStatus==='received'} onChange={e=>{if(e.target.checked)void work(()=>changeDocument('delivered',selected));}}/> Comprobante entregado</label>
+      <p className="ops-hint">{selected.documentCount} imagen(es) · Mercancía: {status(selected.goodsStatus)} · Comprobante: {status(selected.documentStatus)}</p>
+      {selected.documentCount===0&&<><label>Agregar comprobante pendiente<input type="file" accept="image/*" capture="environment" onChange={e=>setExistingEvidence(e.target.files?.[0]??null)}/></label>
+       <button disabled={busy||!existingEvidence} onClick={()=>void work(uploadFile)}>Guardar imagen comprimida</button></>}
       {!demoMode&&<div className="ops-mini-list">{active.documents.filter(d=>d.purchaseId===selected.id).map((d,i)=>
-       <div key={d.id}><span>Comprobante {i+1} · {d.mime}</span><button disabled={busy} onClick={()=>void work(()=>viewEvidence(d.id))}>Ver imagen</button></div>
-      )}</div>}
-      <label>Persona que entrega / recibe<input value={recipient} onChange={e=>setRecipient(e.target.value)} placeholder="Nombre del responsable"/></label>
-      <div className="ops-flex">
-       <button disabled={busy||!['captured','delivered','rejected'].includes(selected.documentStatus)} onClick={()=>void work(()=>changeDocument('delivered'))}>Marcar entregado</button>
-       <button disabled={busy||selected.documentStatus!=='delivered'} onClick={()=>void work(()=>changeDocument('received'))}>Confirmar recibido</button>
-       <button disabled={busy||selected.documentStatus!=='delivered'} onClick={()=>void work(()=>changeDocument('rejected'))}>Rechazar</button>
-      </div>
+       <div key={d.id}><span>Imagen {i+1}</span><button onClick={()=>void work(()=>viewEvidence(d.id))}>Ver comprobante</button></div>)}</div>}
      </div>}
     </section>
    </div>}
@@ -430,7 +426,7 @@ export default function Operations(){
     <div className="ops-scope">{SITES.map(s=><label key={s.id}><input type="checkbox" checked={scope.includes(s.id)} onChange={e=>setScope(curr=>e.target.checked?[...curr,s.id]:curr.filter(x=>x!==s.id))}/>{s.name}</label>)}</div>
     {!demoMode&&<p className="ops-hint">Para consultar varias empresas, selecciónalas y pulsa «Consultar empresas seleccionadas». El backend denegará cualquier empresa que no esté incluida en tus permisos.</p>}
    </section>}
-   <footer className="ops-footer">NIXINX Operations · Incremento 1 (Preview) · Sin conexión automática a Producción ni Conteo de Bolsas</footer>
+   <footer className="ops-footer">Business Transformation · Vista de prueba · Producción y Conteo sin cambios</footer>
   </main>
  </div>;
 }
