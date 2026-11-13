@@ -62,7 +62,6 @@ export default function Operations(){
  useEffect(()=>{
    if(mode!=='live'||!user)return;
    let cancelled=false;
-   setSuperadminVerified(false);
    user.getIdToken().then(async token=>{
      const response=await fetch('/api/operations?site='+site,{headers:{Authorization:'Bearer '+token},cache:'no-store'});
      const result=await response.json() as {data?:OpsSnapshot;error?:string};
@@ -81,7 +80,6 @@ export default function Operations(){
  },[mode,user,site]);
  const active=useMemo(()=>filterSite(data,site),[data,site]);
  const purchases=useMemo(()=>data.purchases.filter(p=>scope.includes(p.siteId)),[data,scope]);
- const stats=useMemo(()=>purchaseSummary(purchases),[purchases]);
  const selected=data.purchases.find(p=>p.id===selection&&p.siteId===site)??active.purchases[0];
  const supplier=active.suppliers.find(x=>x.id===supplierId);
  const presentationProductObj=active.products.find(x=>x.id===presentationProduct);
