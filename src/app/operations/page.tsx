@@ -67,7 +67,7 @@ export default function Operations(){
  const [supplierId,setSupplierId]=useState('htl_charro'),[total,setTotal]=useState('500'),[purchaseDate,setPurchaseDate]=useState(dateToday());
  const [terms,setTerms]=useState('30'),[initialPay,setInitialPay]=useState('0'),[initialMethod,setInitialMethod]=useState<OpsPayment['method']>('card'),[notes,setNotes]=useState('');
  const [payAmount,setPayAmount]=useState(''),[payMethod,setPayMethod]=useState<OpsPayment['method']>('transfer');
- const [recipient,setRecipient]=useState(''),[evidence,setEvidence]=useState<File|null>(null);
+ const [recipient,setRecipient]=useState(''),[verifier,setVerifier]=useState(''),[evidence,setEvidence]=useState<File|null>(null);
  const [newSupplier,setNewSupplier]=useState(''),[newProduct,setNewProduct]=useState(''),[productUnit,setProductUnit]=useState<'kg'|'l'|'unit'>('kg');
  const [presentationProduct,setPresentationProduct]=useState('htl_feta'),[newPresentationLabel,setNewPresentationLabel]=useState('');
  const [packCount,setPackCount]=useState('750'),[packUnit,setPackUnit]=useState<OpsUnit>('g');
@@ -179,6 +179,23 @@ export default function Operations(){
    setChange(selected.id,{goodsStatus:receptionState,receiptCount:selected.receiptCount+1});
   }
  }
+ async function verifyGoods(){
+  if(!selected||selected.goodsStatus!=='received'||selected.receiptCount<1||verifier.trim().length<2)throw new Error('Selecciona una recepción completa y escribe el responsable de la validación.');
+  if(mode==='live'){await request('goods.verify',{purchaseId:selected.id,verifier});await refreshLive();}
+  else setChange(selected.id,{goodsStatus:'verified'});
+  setVerifier('');
+ }
+ async function viewEvidence(id:string){
+  if(!user)throw new Error('Debes iniciar sesión para consultar el comprobante.');
+  const popup=window.open('about:blank','_blank');
+  try{
+   const token=await user.getIdToken();
+   const resp=await fetch('/api/operations/evidence?siteId='+site+'&documentId='+encodeURIComponent(id),{headers:{Authorization:'Bearer '+token}});
+   const result=await resp.json() as {url?:string;error?:string};
+   if(!resp.ok||!result.url)throw new Error(result.error||'No se pudo consultar el documento.');
+   if(popup)popup.location.replace(result.url);else window.location.assign(result.url);
+  }catch(e){popup?.close();throw e;}
+ }
  async function uploadFile(){
   if(!selected||!evidence)throw new Error('Selecciona una imagen y una compra.');
   if(mode==='live'){
@@ -272,6 +289,9 @@ export default function Operations(){
       <label>Fotografía del ticket o factura<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>setEvidence(e.target.files?.[0]??null)}/></label>
       <button disabled={busy||!evidence} onClick={()=>void work(uploadFile)}>Adjuntar imagen</button>
       <p className="ops-hint">{selected.documentCount} evidencia(s) registradas. Imagen privada en Firebase Storage únicamente en modo conectado.</p>
+      {!demoMode&&<div className="ops-mini-list">{active.documents.filter(d=>d.purchaseId===selected.id).map((d,i)=>
+       <div key={d.id}><span>Comprobante {i+1} · {d.mime}</span><button disabled={busy} onClick={()=>void work(()=>viewEvidence(d.id))}>Ver imagen</button></div>
+      )}</div>}
       <label>Persona que entrega / recibe<input value={recipient} onChange={e=>setRecipient(e.target.value)} placeholder="Nombre del responsable"/></label>
       <div className="ops-flex">
        <button disabled={busy||!['captured','delivered','rejected'].includes(selected.documentStatus)} onClick={()=>void work(()=>changeDocument('delivered'))}>Marcar entregado</button>
@@ -303,6 +323,11 @@ export default function Operations(){
      <div className="ops-mini-list">{active.receipts.filter(x=>x.purchaseId===selected.id).map(r=><div key={r.id}>
       <strong>{r.productName}</strong> · {r.packQuantity} × {r.presentationLabel}<small>{r.receivedBaseAmount} {r.unit}</small>
      </div>)}</div></>:<p>Selecciona una compra.</p>}
+     {selected?.goodsStatus==='received'&&selected.receiptCount>0&&<div className="ops-detail">
+      <h3>Validación final de mercancía</h3>
+      <label>Responsable que verifica<input value={verifier} onChange={e=>setVerifier(e.target.value)} placeholder="Nombre del encargado"/></label>
+      <button disabled={busy||verifier.trim().length<2} onClick={()=>void work(verifyGoods)}>Confirmar entrega / recepción validada</button>
+     </div>}
      <p className="ops-hint">La confirmación del saldo físico por presentación y los conteos de almacén se completarán en el incremento de Inventario.</p>
     </section>
    </div>}
