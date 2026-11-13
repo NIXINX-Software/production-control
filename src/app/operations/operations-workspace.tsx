@@ -111,16 +111,16 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
    return ()=>{active=false;};
  },[workspace,user,site]);
  useEffect(()=>{
-   if(mode!=='live'||!user||(workspace!=='admin'&&!workspaceAuthorized))return;
+   if(mode!=='live')return;
    let cancelled=false;
-   user.getIdToken().then(async token=>{
-     const response=await fetch('/api/operations?site='+site,{headers:{Authorization:'Bearer '+token},cache:'no-store'});
+   Promise.resolve().then(async ()=>{
+     const response=await fetch('/api/operations?site='+site,{cache:'no-store'});
      const result=await response.json() as {data?:OpsSnapshot;error?:string};
      if(!response.ok||!result.data)throw new Error(result.error||'Sin autorización de consulta.');
      return result.data;
    }).then(result=>{
      if(cancelled)return;
-     setData(result);setSuperadminVerified(workspace==='admin');
+     setData(result);setSuperadminVerified(workspace==='admin'&&showroomAuthorized);
      setMsg('');
    }).catch(err=>{
      if(cancelled)return;
@@ -146,19 +146,15 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  const associated=selected?data.payments.filter(p=>p.purchaseId===selected.id):[];
  const setChange=(purchaseId:string,patch:Partial<OpsPurchase>)=>setData(d=>({...d,purchases:d.purchases.map(p=>p.id===purchaseId?{...p,...patch}:p)}));
  async function request(action:string,payload:Record<string,unknown>,siteId:OpsSite=site){
-  if(!user)throw new Error('Inicia sesión con una cuenta administrativa autorizada.');
-  const token=await user.getIdToken();
-  const response=await fetch('/api/operations',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},
+  const response=await fetch('/api/operations',{method:'POST',headers:{'Content-Type':'application/json'},
    body:JSON.stringify({...payload,siteId,action})});
   const result=await response.json() as {ok?:boolean;id?:string;error?:string};
   if(!response.ok)throw new Error(result.error||'No se pudo completar la operación.');
   return result;
  }
  async function refreshLive(nextScope:OpsSite[]=scope){
-  if(!user)throw new Error('Inicia sesión para consultar datos autorizados.');
-  const token=await user.getIdToken();
   const requests=await Promise.all(nextScope.map(async id=>{
-   const resp=await fetch('/api/operations?site='+id,{headers:{Authorization:'Bearer '+token},cache:'no-store'});
+   const resp=await fetch('/api/operations?site='+id,{cache:'no-store'});
    const result=await resp.json() as {data?:OpsSnapshot;error?:string};
    if(!resp.ok||!result.data)throw new Error(id.toUpperCase()+': '+(result.error||String(resp.status)));
    return result.data;
@@ -168,17 +164,16 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
     presentations:requests.flatMap(d=>d.presentations),purchases:requests.flatMap(d=>d.purchases),
     payments:requests.flatMap(d=>d.payments),receipts:requests.flatMap(d=>d.receipts),
     documents:requests.flatMap(d=>d.documents)});
-  setSuperadminVerified(workspace==='admin');
+  setSuperadminVerified(workspace==='admin'&&showroomAuthorized);
  }
  async function consultHistory(){
   if(!queryFrom||!queryTo||queryFrom>queryTo)throw new Error('Selecciona un periodo válido.');
   const days=Math.round((Date.parse(queryTo)-Date.parse(queryFrom))/86400000);
   if(days>366)throw new Error('El periodo máximo de consulta es de 12 meses.');
   if(mode==='live'){
-   if(!user)throw new Error('Inicia sesión para consultar compras.');
-   const token=await user.getIdToken();
+ 
    const url='/api/operations?view=history&site='+site+'&from='+encodeURIComponent(queryFrom)+'&to='+encodeURIComponent(queryTo);
-   const response=await fetch(url,{headers:{Authorization:'Bearer '+token},cache:'no-store'});
+   const response=await fetch(url,{cache:'no-store'});
    const body=await response.json() as {purchases?:OpsPurchase[];hasMore?:boolean;error?:string};
    if(!response.ok||!body.purchases)throw new Error(body.error||'Consulta fallida.');
    setData(current=>({...current,purchases:[...current.purchases.filter(p=>p.siteId!==site),...body.purchases!]}));
@@ -294,11 +289,10 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
   else setChange(selected.id,{goodsStatus:'verified'});
  }
  async function viewEvidence(id:string){
-  if(!user)throw new Error('Debes iniciar sesión para consultar el comprobante.');
+ 
   const popup=window.open('about:blank','_blank');
   try{
-   const token=await user.getIdToken();
-   const resp=await fetch('/api/operations/evidence?siteId='+site+'&documentId='+encodeURIComponent(id),{headers:{Authorization:'Bearer '+token}});
+   const resp=await fetch('/api/operations/evidence?siteId='+site+'&documentId='+encodeURIComponent(id));
    const result=await resp.json() as {url?:string;error?:string};
    if(!resp.ok||!result.url)throw new Error(result.error||'No se pudo consultar el documento.');
    if(popup)popup.location.replace(result.url);else window.location.assign(result.url);
@@ -307,10 +301,9 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  async function uploadFileFor(purchaseId:string,file:File){
   const compressed=await resizeEvidence(file);
   if(mode==='live'){
-   if(!user)throw new Error('Inicia sesión para subir comprobantes.');
+ 
    const form=new FormData();form.append('siteId',site);form.append('purchaseId',purchaseId);form.append('file',compressed);
-   const token=await user.getIdToken();
-   const resp=await fetch('/api/operations/evidence',{method:'POST',headers:{Authorization:'Bearer '+token},body:form});
+   const resp=await fetch('/api/operations/evidence',{method:'POST',body:form});
    const ans=await resp.json() as {error?:string};
    if(!resp.ok)throw new Error(ans.error||'Error guardando el comprobante.');
    await refreshLive();
@@ -340,15 +333,15 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  }
  async function login(){if(!auth)throw new Error('Firebase Auth no está configurado.');await signInWithEmailAndPassword(auth,email,password);setPassword('');}
  const demoMode=mode==='demo';
- const showroomVisible=Boolean(user&&showroomAuthorized&&showroomData);
+ const showroomVisible=Boolean(workspace==='admin'&&user&&showroomAuthorized&&showroomData);
  const selectedRows=tab==='showroom'&&showroomVisible?showroomData?.purchases??[]:purchases;
  const showStats=purchaseSummary(selectedRows);
- const currentTitle=demoMode?'DEMOSTRACIÓN EN MEMORIA · CATÁLOGOS VACÍOS':'OPERACIÓN CON AUTENTICACIÓN';
- const accessReady=workspace==='admin'?showroomAuthorized:workspaceAuthorized;
- const canNavigate=workspace==='admin'||workspaceRole==='admin';
+ const currentTitle=demoMode?'DEMOSTRACIÓN EN MEMORIA · CATÁLOGOS VACÍOS':'OPERACIÓN POR ÁREA';
+ const accessReady=workspace==='admin'?showroomAuthorized:true;
+ const canNavigate=workspace==='admin'&&showroomAuthorized;
  if(!accessReady)return <main className="ops ops-wrap"><section className="ops-card" style={{maxWidth:480,margin:'64px auto'}}>
   <h1>{workspace==='admin'?'Administración general':workspace==='compras'?'Registro de compras':'Control de recepción y conciliación'}</h1>
-  <p className="ops-hint">Acceso independiente por usuario, función y empresa. Solo Superadmin puede cambiar de área.</p>
+  <p className="ops-hint">La navegación entre áreas está reservada a Superadmin.</p>
   <label>Empresa operativa<select value={site} onChange={e=>{setWorkspaceAuthorized(false);chooseSite(e.target.value as OpsSite);}}>{SITES.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
   {user?<><p>Sesión: {user.email}</p><p role="alert">{workspaceError||'Verificando autorización…'}</p><button onClick={()=>void signOut(auth!)}>Cambiar de cuenta</button></>:
    <div className="ops-auth-form"><label>Correo<input type="email" value={email} onChange={e=>setEmail(e.target.value)}/></label>
@@ -371,7 +364,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
     </select></label>
     <div className="ops-toolbar-note">Los catálogos operativos se consultan desde Firestore por empresa. En Demo se crean en memoria y no quedan guardados.</div>
    </div>
-   {!demoMode&&<div className="ops-auth">
+   {workspace==='admin'&&!demoMode&&<div className="ops-auth">
      {user?<div className="ops-flex"><span>Sesión: {user.email}</span><button onClick={()=>void work(()=>refreshLive())} disabled={busy}>Consultar empresas seleccionadas</button><button onClick={()=>{setSuperadminVerified(false);setShowroomAuthorized(false);setShowroomData(null);setData(EMPTY_OPS);setTab('compras');void signOut(auth!);}}>Salir</button></div>:
       <div className="ops-auth-form"><strong>Acceso administrativo</strong><input aria-label="Correo" placeholder="Correo electrónico" type="email" value={email} onChange={e=>setEmail(e.target.value)}/>
        <input aria-label="Contraseña" placeholder="Contraseña" type="password" value={password} onChange={e=>setPassword(e.target.value)}/>
