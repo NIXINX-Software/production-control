@@ -197,7 +197,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  const bankVerified=(p:OpsPurchase)=>p.bankStatus==='reconciled';
  async function work(job:()=>Promise<void>){setBusy(true);setMsg('');try{await job();setMsg(current=>current||'Operación completada.');}
   catch(e){setMsg('No se completó: '+(e instanceof Error?e.message:String(e)));}finally{setBusy(false);}}
- function chooseSite(v:OpsSite){setSite(v);setScope([v]);setSuperadminVerified(false);if(tab==='datos')setTab('compras');setSelection('');setSupplierId('');setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');setHistoryLoaded(false);setHistoryOpen(false);setRecentSaved('');}
+ function chooseSite(v:OpsSite){setWorkspaceAuthorized(false);setWorkspaceRole(null);setSite(v);setScope([v]);setSuperadminVerified(false);if(tab==='datos')setTab('compras');setSelection('');setSupplierId('');setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');setHistoryLoaded(false);setHistoryOpen(false);setRecentSaved('');}
  async function addSupplier(){
   if(newSupplier.trim().length<2)throw new Error('Escribe el nombre del proveedor.');
   if(mode==='live'){const result=await request('supplier.add',{name:newSupplier});await refreshLive();if(result.id)setSupplierId(result.id);}
