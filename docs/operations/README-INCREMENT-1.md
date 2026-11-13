@@ -65,3 +65,13 @@ Date: 2026-11-13. Owner: NIXINX. Repository: production-control.
 ## Rollback
 Close PR and delete feat/ops-purchases-preview-20261113 branch; main and production unmodified.
 Sandbox demo source data can be deleted only after reviewing that exact sandbox project/site collection.
+
+## Approved functional UX/security corrections (2026-11-13)
+- **Operational catalogs are NEVER hardcoded.** The application starts with an EMPTY in-memory demo catalog, which may be populated manually by the user for temporary prototyping. Connected Operations retrieves supplier/product/presentation catalogs from the company-authorized Firestore on sign-in and site change. No production fixture records are written.
+- The fixed `src/lib/ops-showroom-fixture.ts` is a **separate synthetic showroom only**, never used to populate purchasing, receiving or catalog forms. Illustrative numbers and suppliers must never be treated as real client records.
+- User-facing identity on `/operations` is Business Transformation / Operaciones, not the name of the software licensor.
+- Purchase stage: vendor, date, amount, **multiple payment methods** (cash, debit/credit, transfers, supplier credit notes), later credit balance, optional observation and photo during purchase. Images are resized client-side to JPEG <=1600px before upload to private Firebase Storage. The purchaser checks that the receipt was delivered; the detailed line-item reception is not part of purchase form.
+- Receiving stage: select purchase, **select/create product master and commercial presentation without leaving Receiving**, quantity, line cost if evidenced, goods complete/partial. Receiver separately acknowledges physical receipt and paper voucher receipt, with audit on server. Warehouse and Production remain unlinked.
+- Finance stage: register later supplier payments, distinguish payable from bank reconciliation; no fictitious statement matches. Financial amount-per-master shown as tentative; import statements and precise matching remain future work.
+- **DWH data interface restricted to server-verified Superadmin**: Firebase identity, superadmin allowlist, active admin role document and explicit requested site in `portal_users.opsSiteIds`. UI hides DWH tab until auth is verified, but server GET `/api/operations?site=...&view=export` revalidates authorization on every export and returns only that site's Firestore `ops_purchases` CSV. Not certified, first-200 rows bounded, never merge companies or export synthetic showroom from this endpoint.
+- Company data and its catalogs remain tenant-scoped and separate, despite authorized cross-company KPI displays.
