@@ -75,3 +75,11 @@ Sandbox demo source data can be deleted only after reviewing that exact sandbox 
 - Finance stage: register later supplier payments, distinguish payable from bank reconciliation; no fictitious statement matches. Financial amount-per-master shown as tentative; import statements and precise matching remain future work.
 - **DWH data interface restricted to server-verified Superadmin**: Firebase identity, superadmin allowlist, active admin role document and explicit requested site in `portal_users.opsSiteIds`. UI hides DWH tab until auth is verified, but server GET `/api/operations?site=...&view=export` revalidates authorization on every export and returns only that site's Firestore `ops_purchases` CSV. Not certified, first-200 rows bounded, never merge companies or export synthetic showroom from this endpoint.
 - Company data and its catalogs remain tenant-scoped and separate, despite authorized cross-company KPI displays.
+
+## Showroom Superadmin boundary (2026-11-13)
+- The **Showroom tab in /operations** is hidden by default and for every regular user, including the unauthenticated in-memory demo. It is shown only when a signed-in account has passed an independent server-side `requireSuperAdmin()` check.
+- Showroom authorization is NOT inferred from a client flag, from Demo mode, or from successful navigation. The server independently verifies Firebase ID token (revocation checked), email Superadmin allowlist, and an active `portal_users/{uid}` administrator role.
+- `GET /api/operations/showroom` rejects unauthenticated and unauthorized calls, serves only synthetic `SHOWROOM_ONLY` data, and uses `Cache-Control: private, no-store`.
+- The fixture resides in a `server-only` module and **is no longer part of the anonymous Operations client bundle**. On logout or revoked client session, the tab/data are removed from the UI.
+- This remains an **internal Superadmin preview**. Public/external showroom delivery belongs to a **separate application** with its own deployment and security contract; do not expose this endpoint publicly or share a production-data API with the future showroom.
+- Existing separate Production Control `/showcase` and its historic API are outside this Operations module; this change does not alter that already-productive flow.
