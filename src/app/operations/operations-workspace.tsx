@@ -349,6 +349,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  if(!accessReady)return <main className="ops ops-wrap"><section className="ops-card" style={{maxWidth:480,margin:'64px auto'}}>
   <h1>{workspace==='admin'?'Administración general':workspace==='compras'?'Registro de compras':'Control de recepción y conciliación'}</h1>
   <p className="ops-hint">Acceso independiente por usuario, función y empresa. Solo Superadmin puede cambiar de área.</p>
+  <label>Empresa operativa<select value={site} onChange={e=>{setWorkspaceAuthorized(false);chooseSite(e.target.value as OpsSite);}}>{SITES.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
   {user?<><p>Sesión: {user.email}</p><p role="alert">{workspaceError||'Verificando autorización…'}</p><button onClick={()=>void signOut(auth!)}>Cambiar de cuenta</button></>:
    <div className="ops-auth-form"><label>Correo<input type="email" value={email} onChange={e=>setEmail(e.target.value)}/></label>
    <label>Contraseña<input type="password" value={password} onChange={e=>setPassword(e.target.value)}/></label>
