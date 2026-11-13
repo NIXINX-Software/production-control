@@ -4,7 +4,6 @@ import {getApps,initializeApp,cert,type App} from 'firebase-admin/app';
 import {getFirestore,FieldValue} from 'firebase-admin/firestore';
 import {getStorage} from 'firebase-admin/storage';
 import {db,requireSameOrigin,text} from '@/lib/pc-server';
-import {requireWorkspaceAccess} from '@/lib/workspace-access';
 import {isOpsSite,type OpsSite} from '@/lib/ops-contract';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
@@ -23,14 +22,12 @@ function sourceApp():App{
   credential:cert({projectId:project,clientEmail:creds.client_email,privateKey:creds.private_key.replace(/\\n/g,'\n')})
  },'nixinx-operations-sandbox');
 }
-async function authorized(req:NextRequest,site:unknown,purpose:'read'|'upload'='read'){
+async function authorized(_req:NextRequest,site:unknown,_purpose:'read'|'upload'='read'){
  if(!isOpsSite(site))throw new Error('INVALID_SITE');
- const user=await requireWorkspaceAccess(req,site,['admin','ops_buyer','ops_backoffice']);
- if(purpose==='upload'&&user.role!=='admin'&&user.role!=='ops_buyer')throw new Error('WORKSPACE_FORBIDDEN');
  const app=sourceApp(),store=getFirestore(app);
  const bucketName=process.env.VERCEL_ENV==='production'?process.env.OPS_EVIDENCE_BUCKET:process.env.OPS_SANDBOX_STORAGE_BUCKET;
  if(!bucketName)throw new Error('OPS_EVIDENCE_BUCKET_NOT_CONFIGURED');
- return {site:site as OpsSite,actor:user.uid,role:user.role,store,bucket:getStorage(app).bucket(bucketName)};
+ return {site:site as OpsSite,actor:'operations-station',store,bucket:getStorage(app).bucket(bucketName)};
 }
 function problem(e:unknown){
  const message=e instanceof Error?e.message:'UPLOAD_ERROR';
