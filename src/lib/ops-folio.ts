@@ -8,8 +8,8 @@ import type {OpsSite} from './ops-contract';
  */
 export async function nextOpsFolio(store:Firestore,site:OpsSite,kind:string,at=new Date()):Promise<string>{
   if(!/^[A-Z]{2,5}$/.test(kind))throw new Error('INVALID_FOLIO_KIND');
-  const year=at.getUTCFullYear();
-  const day=[year,String(at.getUTCMonth()+1).padStart(2,'0'),String(at.getUTCDate()).padStart(2,'0')].join('');
+  const day=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).format(at).replaceAll('-','');
+  const year=Number(day.slice(0,4));
   const ref=store.collection('ops_folio_sequences').doc(site+'_'+kind+'_'+year);
   const count=await store.runTransaction(async tx=>{
     const doc=await tx.get(ref);
