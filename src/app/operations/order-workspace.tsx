@@ -41,8 +41,8 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
  const allowedUnits=PC_UNITS.map(x=>x.id).filter(x=>selectedProduct&&normalUnit(x)===selectedProduct.unit);
  const selectedAvg=costs.find(x=>x.productId===pId)?.avgCostCents??null;
  const estimateSubtotal=orderEstimate(lines);
- const approvedSubtotal=lines.filter(l=>l.ownerAccepted&&OPS_APPROVAL_AREAS.every(a=>Boolean(l.lineApprovals?.[a]))).reduce((sum,l)=>sum+(l.requestedCents??0),0);
- const validatedLineCount=lines.filter(l=>l.ownerAccepted&&OPS_APPROVAL_AREAS.every(a=>Boolean(l.lineApprovals?.[a]))).length;
+ const approvedSubtotal=orders.filter(o=>o.status!=='closed').flatMap(o=>o.lines.filter(l=>l.ownerAccepted)).reduce((sum,l)=>sum+(l.requestedCents??0),0);
+ const validatedLineCount=orders.filter(o=>o.status!=='closed').flatMap(o=>o.lines).filter(l=>l.ownerAccepted).length;
  const budgetCents=budget.trim()?Math.round(Number(budget)*100):lines.reduce((s,l)=>s+(l.requestedCents??0),0);
  const minimum=Number(minPct),maximum=Number(maxPct);
  const budgetBounds=Number.isFinite(budgetCents)&&Number.isFinite(minimum)&&Number.isFinite(maximum)?
@@ -257,33 +257,39 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
     <div className="ops-grid-2"><label>Fecha requerida de abastecimiento
       <input type="date" value={requiredDate} onChange={e=>setRequiredDate(e.target.value)}/></label>
       <label>Responsable<input placeholder="Nombre del preparador" value={name} onChange={e=>setName(e.target.value)}/></label></div>
-    <div className="ops-order-table-scroll"><table className="ops-order-table">
-      <thead><tr><th>Producto maestro</th><th>Cantidad</th><th>Unidad</th><th>Costo histórico / unidad base</th><th>Subtotal estimado</th><th>Importe solicitado CAD</th><th>Compras</th><th>Inventario</th><th>Cocina</th><th>Finanzas</th><th>Comentario decision maker</th><th>Autoriza</th></tr></thead>
-      <tbody>{lines.map(line=><tr key={line.id}>
-        <td>{line.productName}</td>
-        <td><input aria-label={'Cantidad '+line.productName} type="number" min="0.001" step="any" value={line.quantity} onChange={e=>{const n=Number(e.target.value),base=baseAmount(n,line.unit);setLines(ls=>ls.map(l=>l.id===line.id?{...l,quantity:n,requestedBaseAmount:base,estimateCents:l.unitCostCents===null?null:Math.round(base*l.unitCostCents),lineApprovals:{},ownerAccepted:false}:l));}}/></td>
-        <td>{line.unit}</td><td>{money(line.unitCostCents)}</td><td>{money(line.estimateCents)}</td>
-        <td><input aria-label={'Solicitado '+line.productName} type="number" min="0" step="0.01" value={((line.requestedCents??0)/100).toFixed(2)} onChange={e=>setLines(ls=>ls.map(l=>l.id===line.id?{...l,requestedCents:Math.round(Number(e.target.value)*100),lineApprovals:{},ownerAccepted:false}:l))}/></td>
-        {OPS_APPROVAL_AREAS.map(a=><td key={a}><input type="checkbox" aria-label={a+' '+line.productName} checked={Boolean(line.lineApprovals?.[a])} disabled={!name.trim()||Boolean(line.lineApprovals?.[a])} onChange={()=>setLines(ls=>ls.map(l=>l.id===line.id?{...l,lineApprovals:{...l.lineApprovals,[a]:{name,at:new Date().toISOString(),revision:1}},ownerAccepted:false}:l))}/></td>)}
-        <td><textarea aria-label={'Comentario '+line.productName} rows={2} value={line.ownerLineComment??''} onChange={e=>setLines(ls=>ls.map(l=>l.id===line.id?{...l,ownerLineComment:e.target.value,ownerAccepted:false}:l))}/></td>
-        <td><input type="checkbox" aria-label={'Autorización final '+line.productName} checked={Boolean(line.ownerAccepted)} disabled={!OPS_APPROVAL_AREAS.every(a=>Boolean(line.lineApprovals?.[a]))} onChange={e=>setLines(ls=>ls.map(l=>l.id===line.id?{...l,ownerAccepted:e.target.checked}:l))}/></td>
-       </tr>)}</tbody>
+    <div className="ops-order-table-scroll" role="region" aria-label="Planeación de productos" tabIndex={0}><table className="ops-order-table ops-plan-sheet">
+     <thead><tr><th>Producto maestro</th><th>Cantidad</th><th>Unidad</th><th>Costo histórico / unidad</th><th>Subtotal estimado</th><th>Importe solicitado</th>{OPS_APPROVAL_AREAS.map(a=><th key={a}>{a==='inventarios'?'Inventario':a[0].toUpperCase()+a.slice(1)}</th>)}<th>Comentario de propietaria</th><th>Autoriza</th><th></th></tr></thead>
+     <tbody>
+     {lines.map(line=><tr key={line.id}>
+       <td><strong>{line.productName}</strong></td>
+       <td><input aria-label={'Cantidad '+line.productName} type="number" min="0.001" step="any" value={line.quantity} onChange={e=>{const n=Number(e.target.value);if(!(n>0))return;const base=baseAmount(n,line.unit);setLines(ls=>ls.map(l=>l.id===line.id?{...l,quantity:n,requestedBaseAmount:base,estimateCents:l.unitCostCents===null?null:Math.round(base*l.unitCostCents),lineApprovals:{},ownerAccepted:false}:l));}}/></td>
+       <td><select aria-label={'Unidad '+line.productName} value={line.unit} onChange={e=>{const u=e.target.value as OpsUnit;const base=baseAmount(line.quantity,u);setLines(ls=>ls.map(l=>l.id===line.id?{...l,unit:u,requestedBaseAmount:base,estimateCents:l.unitCostCents===null?null:Math.round(base*l.unitCostCents),lineApprovals:{},ownerAccepted:false}:l));}}>{PC_UNITS.filter(u=>normalUnit(u.id)===normalUnit(line.unit)).map(u=><option key={u.id} value={u.id}>{u.es}</option>)}</select></td>
+       <td>{money(line.unitCostCents)} / {normalUnit(line.unit)}</td><td><strong>{money(line.estimateCents)}</strong></td>
+       <td><input aria-label={'Importe solicitado '+line.productName} type="number" min="0" step="0.01" value={line.requestedCents===undefined?'':String(line.requestedCents/100)} onChange={e=>{const value=e.target.value;setLines(ls=>ls.map(l=>l.id===line.id?{...l,requestedCents:Math.round(Number(value)*100),lineApprovals:{},ownerAccepted:false}:l));}}/></td>
+       {OPS_APPROVAL_AREAS.map(a=><td key={a} className="ops-approval-cell"><input type="checkbox" aria-label={a+' '+line.productName} checked={false} disabled title="Las validaciones se registran sobre la propuesta guardada, con auditoría."/></td>)}
+       <td><span className="ops-hint">Pendiente de revisión</span></td><td className="ops-approval-cell"><input type="checkbox" checked={false} disabled aria-label={'Autorización final '+line.productName}/></td>
+       <td><button type="button" aria-label={'Quitar '+line.productName} onClick={()=>setLines(ls=>ls.filter(l=>l.id!==line.id))}>×</button></td>
+      </tr>)}
+      <tr className="ops-plan-entry">
+       <td><select aria-label="Producto maestro nuevo" value={pId} onChange={e=>{setPId(e.target.value);const p=allProducts.find(x=>x.id===e.target.value);if(p)setUnit(p.unit);}}><option value="">+ Seleccionar producto</option>{allProducts.filter(p=>!lines.some(l=>l.productId===p.id)).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></td>
+       <td><input aria-label="Cantidad nueva" type="number" min="0.001" step="any" placeholder="0" value={quantity} onChange={e=>setQuantity(e.target.value)}/></td>
+       <td><select aria-label="Unidad nueva" disabled={!pId} value={unit} onChange={e=>setUnit(e.target.value as OpsUnit)}>{allowedUnits.map(u=><option key={u} value={u}>{PC_UNITS.find(x=>x.id===u)?.es??u}</option>)}</select></td>
+       <td>{money(selectedAvg)}{selectedProduct?' / '+selectedProduct.unit:''}</td>
+       <td>{selectedAvg===null?'Sin costo':money(Math.round(baseAmount(Number(quantity)||0,unit)*selectedAvg))}</td><td>—</td>
+       {OPS_APPROVAL_AREAS.map(a=><td key={a} className="ops-approval-cell">—</td>)}<td>—</td><td>—</td>
+       <td><button type="button" disabled={!pId||!(Number(quantity)>0)} onClick={()=>{try{addLine();}catch(e){setError(String(e));}}}>+ Añadir</button></td>
+      </tr>
+     </tbody>
     </table></div>
-    <div className="ops-grid-2"><label>Agregar producto maestro
-      <select value={pId} onChange={e=>{setPId(e.target.value);const p=allProducts.find(x=>x.id===e.target.value);if(p)setUnit(p.unit);}}>
-       <option value="">Seleccionar producto</option>{allProducts.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-     <label>Cantidad solicitada<input type="number" min="0.001" step="any" value={quantity} onChange={e=>setQuantity(e.target.value)}/></label></div>
-    <label>Unidad<select disabled={!pId} value={unit} onChange={e=>setUnit(e.target.value as OpsUnit)}>{allowedUnits.map(u=><option value={u} key={u}>{PC_UNITS.find(x=>x.id===u)?.es??u}</option>)}</select></label>
-    {demoOnly&&<div className="ops-inline-editor"><label>Nuevo producto de demostración<input value={newDemoProduct} onChange={e=>setNewDemoProduct(e.target.value)}/></label><button type="button" onClick={()=>{if(newDemoProduct.trim().length>1){setDemoProducts(p=>[...p,{id:'demo_'+crypto.randomUUID(),name:newDemoProduct.trim(),unit:'kg'}]);setNewDemoProduct('');}}}>Crear producto en memoria</button></div>}
-    <p className="ops-hint">Costo histórico: {money(selectedAvg)}{selectedProduct?' / '+selectedProduct.unit:''}. Sin datos históricos se requiere importe manual.</p>
-    <button disabled={!pId||!(Number(quantity)>0)} onClick={()=>{try{addLine();}catch(e){setError(String(e));}}}>+ Agregar renglón</button>
+    <p className="ops-hint">Primero guarda la propuesta. Después, las áreas y la propietaria validarán los productos en la misma disposición de columnas; no se permiten aprobaciones ficticias en el borrador.</p>
+    {demoOnly&&<div className="ops-inline-editor"><label>Crear producto maestro de demostración<input value={newDemoProduct} onChange={e=>setNewDemoProduct(e.target.value)} placeholder="Nuevo producto" /></label><button type="button" onClick={()=>{if(newDemoProduct.trim().length>1){setDemoProducts(p=>[...p,{id:'demo_'+crypto.randomUUID(),name:newDemoProduct.trim(),unit:'kg'}]);setNewDemoProduct('');}}}>Crear en memoria</button></div>}
     <div className="ops-payment-summary">
       <div><span>Subtotal estimado</span><strong>{money(estimateSubtotal)}</strong></div>
       <div><span>Subtotal solicitado</span><strong>{money(lines.reduce((s,l)=>s+(l.requestedCents??0),0))}</strong></div>
       <div><span>Subtotal validado por todos</span><strong>{money(approvedSubtotal)} · {validatedLineCount}/{lines.length}</strong></div>
     </div>
-    <p className="ops-hint">Estado: {lines.length&&validatedLineCount===lines.length?'Liberada':validatedLineCount>0?'Parcial':'En proceso'}. Las validaciones por renglón de esta tabla son la preparación visual; la aprobación real se realiza abajo sobre la orden guardada y se verifica en el servidor.</p>
-    <label>Presupuesto solicitado total (CAD)<input type="number" min="0.01" step="0.01" value={budget} onChange={e=>setBudget(e.target.value)}/></label>
+    <p className="ops-hint">Estado de esta propuesta: En proceso hasta recibir las validaciones posteriores al guardado.</p>
+    <label>Presupuesto solicitado total (CAD)<input type="number" min="0.01" step="0.01" placeholder={String(lines.reduce((s,l)=>s+(l.requestedCents??0),0)/100)} value={budget} onChange={e=>setBudget(e.target.value)}/></label>
     <h3>Margen autorizado sobre el presupuesto solicitado</h3>
     <div className="ops-grid-2 ops-budget-sliders">
      <label>Porcentaje mínimo: <strong>{minPct}%</strong>
