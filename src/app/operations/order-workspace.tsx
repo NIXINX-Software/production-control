@@ -27,9 +27,10 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
  const [previewDisabled,setPreviewDisabled]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [name,setName]=useState(''),[pId,setPId]=useState(''),[unit,setUnit]=useState<OpsUnit>('kg'),[quantity,setQuantity]=useState('');
  const [lines,setLines]=useState<OpsOrderLine[]>([]),[budget,setBudget]=useState(''),[minPct,setMinPct]=useState('90'),[maxPct,setMaxPct]=useState('120');
- const [revisionId,setRevisionId]=useState('');
+ const [revisionId,setRevisionId]=useState(''),[requiredDate,setRequiredDate]=useState(today());
  const [comment,setComment]=useState(''),[paidSupplier,setPaidSupplier]=useState(''),[paidAmount,setPaidAmount]=useState(''),[paidRef,setPaidRef]=useState(''),[paidMethod,setPaidMethod]=useState('transfer');
  const [supplies,setSupplies]=useState<Record<string,string>>({});
+ const [supplyNotes,setSupplyNotes]=useState<Record<string,string>>({});
  const [demoProducts,setDemoProducts]=useState<{id:string;name:string;unit:'kg'|'l'|'unit'}[]>([]),[newDemoProduct,setNewDemoProduct]=useState('');
  const demoOnly=demo||previewDisabled;
  const allProducts=useMemo(()=>[
@@ -40,6 +41,8 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
  const allowedUnits=PC_UNITS.map(x=>x.id).filter(x=>selectedProduct&&normalUnit(x)===selectedProduct.unit);
  const selectedAvg=costs.find(x=>x.productId===pId)?.avgCostCents??null;
  const estimateSubtotal=orderEstimate(lines);
+ const approvedSubtotal=lines.filter(l=>l.ownerAccepted&&OPS_APPROVAL_AREAS.every(a=>Boolean(l.lineApprovals?.[a]))).reduce((sum,l)=>sum+(l.requestedCents??0),0);
+ const validatedLineCount=lines.filter(l=>l.ownerAccepted&&OPS_APPROVAL_AREAS.every(a=>Boolean(l.lineApprovals?.[a]))).length;
  const budgetCents=Math.round(Number(budget)*100);
  const minimum=Number(minPct),maximum=Number(maxPct);
  const budgetBounds=Number.isFinite(budgetCents)&&Number.isFinite(minimum)&&Number.isFinite(maximum)?
@@ -135,7 +138,7 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
   if(lines.some(x=>x.productId===pId))throw new Error('Este producto ya está en la orden.');
   const base=baseAmount(Number(quantity),unit);
   setLines(l=>[...l,{id:crypto.randomUUID(),productId:pId,productName:selectedProduct.name,
-   unit,quantity:Number(quantity),requestedBaseAmount:base,unitCostCents:selectedAvg,
+   unit,quantity:Number(quantity),requestedBaseAmount:base,unitCostCents:selectedAvg,requestedCents:selectedAvg===null?0:Math.round(base*selectedAvg),lineApprovals:{},ownerAccepted:false,
    estimateCents:selectedAvg===null?null:Math.round(base*selectedAvg),suppliedBaseAmount:0,supplyStatus:'pending'}]);
   setPId('');setQuantity('');
  }
@@ -144,12 +147,12 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
     minimum<0||minimum>100||maximum<100||maximum>300)throw new Error('Captura productos y presupuesto con márgenes válidos.');
   if(demoOnly){
    if(revisionId){
-    setOrders(o=>o.map(x=>x.id===revisionId?{...demoOrder(site,lines,from,to,budgetCents,minimum,maximum,name),
+    setOrders(o=>o.map(x=>x.id===revisionId?{...{...demoOrder(site,lines,from,to,budgetCents,minimum,maximum,name),requiredDate},
      id:x.id,folio:x.folio,revision:x.revision+1}:x));
-   }else setOrders(o=>[demoOrder(site,lines,from,to,budgetCents,minimum,maximum,name),...o]);
+   }else setOrders(o=>[{...demoOrder(site,lines,from,to,budgetCents,minimum,maximum,name),requiredDate},...o]);
   }else{
    await call(revisionId?'order.revise':'order.create',{...(revisionId?{orderId:revisionId}:{}),
-    from,to,lines:lines.map(x=>({productId:x.productId,quantity:x.quantity,unit:x.unit})),
+    from,to,requiredDate,lines:lines.map(x=>({productId:x.productId,quantity:x.quantity,unit:x.unit,requestedCents:x.requestedCents??0})),
     requestedBudgetCents:budgetCents,minPercent:minimum,maxPercent:maximum});
    await fetchAll();
   }
@@ -178,15 +181,30 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
  function edit(order:OpsOrder){
   setRevisionId(order.id);setLines(order.lines.map(x=>({...x,id:crypto.randomUUID(),suppliedBaseAmount:0,supplyStatus:'pending'})));
   setFrom(order.from);setTo(order.to);setBudget((order.requestedBudgetCents/100).toFixed(2));
-  setMinPct(String(order.minPercent));setMaxPct(String(order.maxPercent));
+  setMinPct(String(order.minPercent));setMaxPct(String(order.maxPercent));setRequiredDate(order.requiredDate??today());
   setNotice('Edición de '+order.folio+': guarda la propuesta para reiniciar las validaciones.');
  }
- async function markSupply(order:OpsOrder,line:OpsOrderLine,amount:number){
+ async function lineApproval(order:OpsOrder,line:OpsOrderLine,role:OpsApprovalArea){
+  if(name.trim().length<2)throw new Error('Identifica al responsable del área.');
+  if(demoOnly)setOrders(os=>os.map(o=>o.id!==order.id?o:{...o,lines:o.lines.map(l=>l.id===line.id?{...l,lineApprovals:{...l.lineApprovals,[role]:{name:name.trim(),at:new Date().toISOString(),revision:o.revision}},ownerAccepted:false}:l)}));
+  else {await call('order.line.approval',{orderId:order.id,lineId:line.id,role});await fetchAll();}
+ }
+ async function lineOwner(order:OpsOrder,line:OpsOrderLine,accepted:boolean){
+  if(!demoOnly&&!ownerOnly)throw new Error('La autorización de la propietaria requiere Superadmin.');
+  if(accepted&&!OPS_APPROVAL_AREAS.every(a=>line.lineApprovals?.[a]?.revision===order.revision))throw new Error('Faltan validaciones del producto.');
+  if(demoOnly)setOrders(os=>os.map(o=>o.id!==order.id?o:(()=>{
+   const next=o.lines.map(l=>l.id===line.id?{...l,ownerAccepted:accepted,ownerLineComment:comment}:l);
+   return {...o,lines:next,status:next.every(l=>l.ownerAccepted&&OPS_APPROVAL_AREAS.every(a=>l.lineApprovals?.[a]?.revision===o.revision))?'approved':'draft'};
+  })()));
+  else {await call('order.line.owner',{orderId:order.id,lineId:line.id,accepted,comment},'/api/operations/orders',true);await fetchAll();}
+  setComment('');
+ }
+ async function markSupply(order:OpsOrder,line:OpsOrderLine,amount:number,note=''){
   if(amount<0||amount>line.quantity)throw new Error('La cantidad no puede superar lo solicitado.');
   const suppliedBaseAmount=amount<=0?0:baseAmount(amount,line.unit);
   if(demoOnly)setOrders(items=>items.map(o=>o.id===order.id?{...o,lines:o.lines.map(l=>l.id===line.id?{...l,
-   suppliedBaseAmount,supplyStatus:supplyStatusFor(l.requestedBaseAmount,suppliedBaseAmount)}:l)}:o));
-  else{await call('order.supply',{orderId:order.id,lineId:line.id,suppliedBaseAmount});await fetchAll();}
+   suppliedBaseAmount,supplyStatus:supplyStatusFor(l.requestedBaseAmount,suppliedBaseAmount),note}:l)}:o));
+  else{await call('order.supply',{orderId:order.id,lineId:line.id,suppliedBaseAmount,note});await fetchAll();}
  }
  async function close(order:OpsOrder){
   const reason=window.prompt('¿Por qué das por atendida esta orden? (incluye faltantes si los hay)');
@@ -235,19 +253,36 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
       <label>Producto de demostración<input placeholder="Nombre de producto maestro" value={newDemoProduct} onChange={e=>setNewDemoProduct(e.target.value)}/></label>
       <button type="button" onClick={()=>{if(newDemoProduct.trim().length>1){setDemoProducts(p=>[...p,{id:'demo_'+crypto.randomUUID(),name:newDemoProduct.trim(),unit:'kg'}]);setNewDemoProduct('');}}}>Crear solo en memoria</button>
      </div>}
-    <label>Producto maestro<select value={pId} onChange={e=>{setPId(e.target.value);const p=allProducts.find(x=>x.id===e.target.value);if(p)setUnit(p.unit);}}>
-      <option value="">Seleccionar producto</option>{allProducts.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-    <div className="ops-grid-2"><label>Unidad<select value={unit} disabled={!pId} onChange={e=>setUnit(e.target.value as OpsUnit)}>
-     {allowedUnits.map(u=><option key={u} value={u}>{PC_UNITS.find(x=>x.id===u)?.es??u}</option>)}</select></label>
-     <label>Cantidad solicitada<input inputMode="decimal" type="number" min="0.001" step="any" value={quantity} onChange={e=>setQuantity(e.target.value)}/></label></div>
-    <p className="ops-hint">Precio medio por unidad base: {money(selectedAvg)}{selectedProduct?' / '+selectedProduct.unit:''}. {selectedAvg===null?'Sin datos de costo, requiere presupuesto manual.':''}</p>
-    <button type="button" disabled={!pId||!(Number(quantity)>0)} onClick={()=>{try{addLine();}catch(e){setError(String(e));}}}>+ Agregar a la orden</button>
-    <div className="ops-order-lines">{lines.map(line=><div key={line.id} className="ops-order-line">
-      <span><strong>{line.productName}</strong><small>{line.quantity} {line.unit} · {money(line.estimateCents)}</small></span>
-      <button type="button" onClick={()=>setLines(v=>v.filter(x=>x.id!==line.id))}>Quitar</button>
-     </div>)}</div>
-    <div className="ops-payment-summary"><div><span>Subtotal estimado</span><strong>{money(estimateSubtotal)}</strong></div></div>
-    <label>Presupuesto solicitado (CAD)<input inputMode="decimal" type="number" min="0.01" step="0.01" value={budget} onChange={e=>setBudget(e.target.value)}/></label>
+    <div className="ops-grid-2"><label>Fecha requerida de abastecimiento
+      <input type="date" value={requiredDate} onChange={e=>setRequiredDate(e.target.value)}/></label>
+      <label>Responsable<input placeholder="Nombre del preparador" value={name} onChange={e=>setName(e.target.value)}/></label></div>
+    <div className="ops-order-table-scroll"><table className="ops-order-table">
+      <thead><tr><th>Producto maestro</th><th>Cantidad</th><th>Unidad</th><th>Costo histórico / unidad base</th><th>Subtotal estimado</th><th>Importe solicitado CAD</th><th>Compras</th><th>Inventario</th><th>Cocina</th><th>Finanzas</th><th>Comentario decision maker</th><th>Autoriza</th></tr></thead>
+      <tbody>{lines.map(line=><tr key={line.id}>
+        <td>{line.productName}</td>
+        <td><input aria-label={'Cantidad '+line.productName} type="number" min="0.001" step="any" value={line.quantity} onChange={e=>{const n=Number(e.target.value),base=baseAmount(n,line.unit);setLines(ls=>ls.map(l=>l.id===line.id?{...l,quantity:n,requestedBaseAmount:base,estimateCents:l.unitCostCents===null?null:Math.round(base*l.unitCostCents),lineApprovals:{},ownerAccepted:false}:l));}}/></td>
+        <td>{line.unit}</td><td>{money(line.unitCostCents)}</td><td>{money(line.estimateCents)}</td>
+        <td><input aria-label={'Solicitado '+line.productName} type="number" min="0" step="0.01" value={((line.requestedCents??0)/100).toFixed(2)} onChange={e=>setLines(ls=>ls.map(l=>l.id===line.id?{...l,requestedCents:Math.round(Number(e.target.value)*100),lineApprovals:{},ownerAccepted:false}:l))}/></td>
+        {OPS_APPROVAL_AREAS.map(a=><td key={a}><input type="checkbox" aria-label={a+' '+line.productName} checked={Boolean(line.lineApprovals?.[a])} disabled={!name.trim()||Boolean(line.lineApprovals?.[a])} onChange={()=>setLines(ls=>ls.map(l=>l.id===line.id?{...l,lineApprovals:{...l.lineApprovals,[a]:{name,at:new Date().toISOString(),revision:1}},ownerAccepted:false}:l))}/></td>)}
+        <td><textarea aria-label={'Comentario '+line.productName} rows={2} value={line.ownerLineComment??''} onChange={e=>setLines(ls=>ls.map(l=>l.id===line.id?{...l,ownerLineComment:e.target.value,ownerAccepted:false}:l))}/></td>
+        <td><input type="checkbox" aria-label={'Autorización final '+line.productName} checked={Boolean(line.ownerAccepted)} disabled={!OPS_APPROVAL_AREAS.every(a=>Boolean(line.lineApprovals?.[a]))} onChange={e=>setLines(ls=>ls.map(l=>l.id===line.id?{...l,ownerAccepted:e.target.checked}:l))}/></td>
+       </tr>)}</tbody>
+    </table></div>
+    <div className="ops-grid-2"><label>Agregar producto maestro
+      <select value={pId} onChange={e=>{setPId(e.target.value);const p=allProducts.find(x=>x.id===e.target.value);if(p)setUnit(p.unit);}}>
+       <option value="">Seleccionar producto</option>{allProducts.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+     <label>Cantidad solicitada<input type="number" min="0.001" step="any" value={quantity} onChange={e=>setQuantity(e.target.value)}/></label></div>
+    <label>Unidad<select disabled={!pId} value={unit} onChange={e=>setUnit(e.target.value as OpsUnit)}>{allowedUnits.map(u=><option value={u} key={u}>{PC_UNITS.find(x=>x.id===u)?.es??u}</option>)}</select></label>
+    {demoOnly&&<div className="ops-inline-editor"><label>Nuevo producto de demostración<input value={newDemoProduct} onChange={e=>setNewDemoProduct(e.target.value)}/></label><button type="button" onClick={()=>{if(newDemoProduct.trim().length>1){setDemoProducts(p=>[...p,{id:'demo_'+crypto.randomUUID(),name:newDemoProduct.trim(),unit:'kg'}]);setNewDemoProduct('');}}}>Crear producto en memoria</button></div>}
+    <p className="ops-hint">Costo histórico: {money(selectedAvg)}{selectedProduct?' / '+selectedProduct.unit:''}. Sin datos históricos se requiere importe manual.</p>
+    <button disabled={!pId||!(Number(quantity)>0)} onClick={()=>{try{addLine();}catch(e){setError(String(e));}}}>+ Agregar renglón</button>
+    <div className="ops-payment-summary">
+      <div><span>Subtotal estimado</span><strong>{money(estimateSubtotal)}</strong></div>
+      <div><span>Subtotal solicitado</span><strong>{money(lines.reduce((s,l)=>s+(l.requestedCents??0),0))}</strong></div>
+      <div><span>Subtotal validado por todos</span><strong>{money(approvedSubtotal)} · {validatedLineCount}/{lines.length}</strong></div>
+    </div>
+    <p className="ops-hint">Estado: {lines.length&&validatedLineCount===lines.length?'Liberada':validatedLineCount>0?'Parcial':'En proceso'}. Las validaciones por renglón de esta tabla son la preparación visual; la aprobación real se realiza abajo sobre la orden guardada y se verifica en el servidor.</p>
+    <label>Presupuesto solicitado total (CAD)<input type="number" min="0.01" step="0.01" value={budget} onChange={e=>setBudget(e.target.value)}/></label>
     <h3>Margen autorizado sobre el presupuesto solicitado</h3>
     <div className="ops-grid-2 ops-budget-sliders">
      <label>Porcentaje mínimo: <strong>{minPct}%</strong>
