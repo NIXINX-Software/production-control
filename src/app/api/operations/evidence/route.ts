@@ -1,13 +1,19 @@
 import {NextRequest,NextResponse} from 'next/server';
 import {createHash,randomUUID} from 'node:crypto';
 import {getApps,type App} from 'firebase-admin/app';
-import {getFirestore,FieldValue} from 'firebase-admin/firestore';
+import {getFirestore,FieldValue,Timestamp} from 'firebase-admin/firestore';
 import {getStorage} from 'firebase-admin/storage';
 import {db,requireSameOrigin,text} from '@/lib/pc-server';
-import {isOpsSite,type OpsSite} from '@/lib/ops-contract';
+import {isOpsSite,validDate,type OpsSite} from '@/lib/ops-contract';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
 const SIZE_LIMIT=8*1024*1024;
+// Use the Toronto calendar day of an order's creation, not its historical-cost estimate period.
+function torontoDay(date:Date):string {
+ const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date);
+ const value=(part:'year'|'month'|'day')=>parts.find(item=>item.type===part)?.value??'';
+ return [value('year'),value('month'),value('day')].join('-');
+}
 function sourceApp():App {
  if(process.env.VERCEL_ENV!=='production')throw new Error('OPS_PREVIEW_DISABLED');
  db();
@@ -48,9 +54,17 @@ export async function POST(req:NextRequest){
   if(!isImage(buffer,mime))throw new Error('INVALID_FILE_TYPE');
   const documentId=site+'_'+randomUUID();
   const ext=mime==='image/jpeg'?'jpg':mime==='image/png'?'png':'webp';
-  // Keep company and ticket type as the only folder levels; use the purchase folio for traceability.
+  // Company / ticket type / date of linked purchase order (or purchase date if no order).
+  const orderId=typeof purchase.orderId==='string'?purchase.orderId:'';
+  const order=orderId?(await store.collection('ops_orders').doc(orderId).get()).data():null;
+  if(order&&order.siteId!==site)throw new Error('INVALID_ORDER_SITE');
+  const folderDate=order?.createdAt instanceof Timestamp
+   ? torontoDay(order.createdAt.toDate())
+   : validDate(purchase.purchaseDate)?purchase.purchaseDate:null;
+  if(!folderDate||!validDate(folderDate))throw new Error('INVALID_PURCHASE_DATE');
   const purchaseFolio=typeof purchase.folio==='string'&&/^[A-Z0-9-]{1,80}$/.test(purchase.folio)?purchase.folio:purchaseId;
-  const storagePath=[site,'tickets-de-compra',purchaseFolio+'_'+documentId+'.'+ext].join('/');
+  // The folio is readable while the document ID ensures multiple photos never overwrite one another.
+  const storagePath=[site.toUpperCase(),'tickets-de-compra',folderDate,purchaseFolio+'_'+documentId+'.'+ext].join('/');
   const object=bucket.file(storagePath);
   await object.save(buffer,{resumable:false,metadata:{contentType:mime,cacheControl:'private,no-store',metadata:{sha256:createHash('sha256').update(buffer).digest('hex')}}});
   try{
