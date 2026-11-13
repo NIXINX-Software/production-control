@@ -133,9 +133,9 @@ export async function POST(req:NextRequest){
     return NextResponse.json({ok:true,id});
   }
   if(action==='purchase.add'){
-    const supplierId=text(body.supplierId,130),totalCents=body.totalCents,date=body.purchaseDate,termsDays=Number(body.termsDays??0);
+    const supplierId=text(body.supplierId,130),totalCents=body.totalCents,date=body.purchaseDate,termsDays=body.termsDays===null||body.termsDays===undefined||body.termsDays===''?null:Number(body.termsDays);
     const payments=Array.isArray(body.initialPayments)?body.initialPayments:[];
-    if(!validMoneyCents(totalCents)||!opsDate(date)||!Number.isSafeInteger(termsDays)||termsDays<0||termsDays>365||payments.length>15)throw new Error('INVALID_PURCHASE');
+    if(!validMoneyCents(totalCents)||!opsDate(date)||(termsDays!==null&&(!Number.isSafeInteger(termsDays)||termsDays<1||termsDays>365))||payments.length>15)throw new Error('INVALID_PURCHASE');
     const supplier=(await store.collection('ops_suppliers').doc(supplierId).get()).data();
     if(!supplier||supplier.siteId!==site||supplier.active!==true)throw new Error('INVALID_SUPPLIER');
     const normalized: {method:OpsPayment['method'];amountCents:number;reference:string}[]=[];
@@ -144,7 +144,7 @@ export async function POST(req:NextRequest){
       normalized.push({method:pay.method as OpsPayment['method'],amountCents:pay.amountCents,reference:text(pay.reference,100)});
     }
     const {paidCents,balanceCents}=purchaseBalances(totalCents,normalized.map(p=>p.amountCents));
-    const dueDate=balanceCents>0?new Date(Date.parse(date+'T12:00:00Z')+termsDays*86400000).toISOString().slice(0,10):null;
+    const dueDate=balanceCents>0&&termsDays!==null?new Date(Date.parse(date+'T12:00:00Z')+termsDays*86400000).toISOString().slice(0,10):null;
     const id=docId(site),purchaseRef=store.collection('ops_purchases').doc(id),batch=store.batch();
     batch.create(purchaseRef,{siteId:site,purchaseDate:date,supplierId,supplierName:supplier.name,totalCents,
       currency:'CAD',paidCents,balanceCents,dueDate,goodsStatus:'pending',documentStatus:'missing',
