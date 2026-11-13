@@ -1,2 +1,2 @@
-import Operations from '../operations/page';
-export default function Page(){return <Operations workspace="control"/>;}
+import OperationsWorkspace from '../operations/operations-workspace';
+export default function Page(){return <OperationsWorkspace workspace="control"/>;}
