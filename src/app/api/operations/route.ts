@@ -2,6 +2,7 @@ import {NextRequest,NextResponse} from 'next/server';
 import {FieldValue,type Firestore} from 'firebase-admin/firestore';
 import {db,requireSameOrigin,requireSuperAdmin,text} from '@/lib/pc-server';
 import {csvExport} from '@/lib/pc-operational-files';
+import {nextOpsFolio} from '@/lib/ops-folio';
 import {
   OPS_UNITS,isOpsSite,measureOf,normalUnit,baseAmount,validMoneyCents,validDate as opsDate,
   isRecord,purchaseBalances,bankStatusForPayments,type OpsSite,type OpsPayment,type OpsSnapshot
@@ -96,16 +97,40 @@ export async function POST(req:NextRequest){
   if(action==='supplier.add'){
     const name=text(body.name,120);
     if(invalid(name))throw new Error('INVALID_SUPPLIER');
-    const id=docId(site);
-    await store.collection('ops_suppliers').doc(id).create({siteId:site,name,active:true,createdAt:now,updatedAt:now});
+    const id=docId(site),folio=await nextOpsFolio(store,site,'PRV');
+    await store.collection('ops_suppliers').doc(id).create({siteId:site,folio,name,active:true,createdAt:now,updatedAt:now});
     return NextResponse.json({ok:true,id});
   }
   if(action==='product.add'){
     const name=text(body.name,120),unit=body.unit;
     if(invalid(name)||!['kg','l','unit'].includes(String(unit)))throw new Error('INVALID_PRODUCT');
-    const id=docId(site);
-    await store.collection('ops_products').doc(id).create({siteId:site,name,unit,active:true,createdAt:now,updatedAt:now});
+    const id=docId(site),folio=await nextOpsFolio(store,site,'PM');
+    await store.collection('ops_products').doc(id).create({siteId:site,folio,name,unit,active:true,createdAt:now,updatedAt:now});
     return NextResponse.json({ok:true,id});
+  }
+  if(action==='product.update'||action==='product.deactivate'||action==='product.delete'){
+    const id=text(body.productId,130);
+    const ref=store.collection('ops_products').doc(id);
+    const current=await ref.get();
+    const product=current.data();
+    if(!product||product.siteId!==site)throw new Error('PRODUCT_NOT_FOUND');
+    const linkedPresentations=await store.collection('ops_presentations').where('productId','==',id).limit(1).get();
+    const linkedReceipts=await store.collection('ops_receipts').where('productId','==',id).limit(1).get();
+    const used=!linkedPresentations.empty||!linkedReceipts.empty;
+    if(action==='product.delete'){
+      if(used)throw new Error('PRODUCT_IN_USE_DEACTIVATE_INSTEAD');
+      await ref.delete();
+      return NextResponse.json({ok:true});
+    }
+    if(action==='product.deactivate'){
+      await ref.update({active:false,updatedAt:now});
+      return NextResponse.json({ok:true});
+    }
+    const name=text(body.name,120),unit=body.unit;
+    if(invalid(name)||!['kg','l','unit'].includes(String(unit)))throw new Error('INVALID_PRODUCT');
+    if(used&&unit!==product.unit)throw new Error('PRODUCT_UNIT_LOCKED_BY_HISTORY');
+    await ref.update({name,unit,active:true,updatedAt:now});
+    return NextResponse.json({ok:true});
   }
   if(action==='presentation.add'){
     const productId=text(body.productId,130),label=text(body.label,100),unit=body.packUnit,packCount=Number(body.packCount);
@@ -113,9 +138,29 @@ export async function POST(req:NextRequest){
     const product=(await store.collection('ops_products').doc(productId).get()).data();
     if(!product||product.siteId!==site||product.active!==true||product.unit!==normalUnit(unit as typeof OPS_UNITS[number])||(!Number.isInteger(packCount)&&measureOf(unit as typeof OPS_UNITS[number])==='count'))throw new Error('INVALID_PRESENTATION');
     const unitAmount=baseAmount(packCount,unit as typeof OPS_UNITS[number]);
-    const id=docId(site);
-    await store.collection('ops_presentations').doc(id).create({siteId:site,productId,label,packCount,packUnit:unit,unitAmount,unit:product.unit,active:true,createdAt:now,updatedAt:now});
+    const id=docId(site),folio=await nextOpsFolio(store,site,'PRE');
+    await store.collection('ops_presentations').doc(id).create({siteId:site,folio,productId,label,packCount,packUnit:unit,unitAmount,unit:product.unit,active:true,createdAt:now,updatedAt:now});
     return NextResponse.json({ok:true,id});
+  }
+  if(action==='presentation.update'||action==='presentation.deactivate'||action==='presentation.delete'){
+    const id=text(body.presentationId,130),ref=store.collection('ops_presentations').doc(id);
+    const existing=(await ref.get()).data();
+    if(!existing||existing.siteId!==site)throw new Error('PRESENTATION_NOT_FOUND');
+    const linked=await store.collection('ops_receipts').where('presentationId','==',id).limit(1).get();
+    if(action==='presentation.delete'){
+      if(!linked.empty)throw new Error('PRESENTATION_IN_USE_DEACTIVATE_INSTEAD');
+      await ref.delete();return NextResponse.json({ok:true});
+    }
+    if(action==='presentation.deactivate'){
+      await ref.update({active:false,updatedAt:now});return NextResponse.json({ok:true});
+    }
+    if(!linked.empty)throw new Error('PRESENTATION_IN_USE_CREATE_NEW_INSTEAD');
+    const label=text(body.label,100),unit=body.packUnit,packCount=Number(body.packCount);
+    if(invalid(label)||!OPS_UNITS.some(u=>u===unit)||!Number.isFinite(packCount)||packCount<=0||packCount>100000)throw new Error('INVALID_PRESENTATION');
+    const product=(await store.collection('ops_products').doc(existing.productId).get()).data();
+    if(!product||product.siteId!==site||product.unit!==normalUnit(unit as typeof OPS_UNITS[number])||(!Number.isInteger(packCount)&&measureOf(unit as typeof OPS_UNITS[number])==='count'))throw new Error('INVALID_PRESENTATION');
+    await ref.update({label,packCount,packUnit:unit,unitAmount:baseAmount(packCount,unit as typeof OPS_UNITS[number]),updatedAt:now});
+    return NextResponse.json({ok:true});
   }
   if(action==='purchase.add'){
     const supplierId=text(body.supplierId,130),totalCents=body.totalCents,date=body.purchaseDate,termsDays=body.termsDays===null||body.termsDays===undefined||body.termsDays===''?null:Number(body.termsDays);
@@ -128,25 +173,61 @@ export async function POST(req:NextRequest){
       if(!isRecord(pay)||!['cash','debit_card','credit_card','credit_note','card','transfer','other'].includes(String(pay.method))||!validMoneyCents(pay.amountCents))throw new Error('INVALID_PAYMENTS');
       normalized.push({method:pay.method as OpsPayment['method'],amountCents:pay.amountCents,reference:text(pay.reference,100)});
     }
-    const {paidCents,balanceCents}=purchaseBalances(totalCents,normalized.map(p=>p.amountCents));
+    const creditNoteCents=normalized.filter(p=>p.method==='credit_note').reduce((sum,p)=>sum+p.amountCents,0);
+    const monetary=normalized.filter(p=>p.method!=='credit_note');
+    if(monetary.reduce((sum,p)=>sum+p.amountCents,0)+creditNoteCents>totalCents)throw new Error('PAYMENT_EXCEEDS_TOTAL');
+    const {paidCents,balanceCents}=purchaseBalances(totalCents,monetary.map(p=>p.amountCents));
     const dueDate=balanceCents>0&&termsDays!==null?new Date(Date.parse(date+'T12:00:00Z')+termsDays*86400000).toISOString().slice(0,10):null;
-    const id=docId(site),purchaseRef=store.collection('ops_purchases').doc(id),batch=store.batch();
-    batch.create(purchaseRef,{siteId:site,purchaseDate:date,supplierId,supplierName:supplier.name,totalCents,
+    const id=docId(site),folio=await nextOpsFolio(store,site,'CMP'),purchaseRef=store.collection('ops_purchases').doc(id),batch=store.batch();
+    const orderId=typeof body.orderId==='string'?text(body.orderId,140):'';
+    if(orderId){const o=(await store.collection('ops_orders').doc(orderId).get()).data();if(!o||o.siteId!==site||o.status!=='approved')throw new Error('INVALID_PURCHASE_ORDER_LINK');}
+    batch.create(purchaseRef,{siteId:site,folio,orderId:orderId||null,purchaseDate:date,supplierId,supplierName:supplier.name,totalCents,supplierCreditCents:creditNoteCents,
       currency:'CAD',paidCents,balanceCents,dueDate,goodsStatus:'pending',documentStatus:'missing',
-      bankStatus:bankStatusForPayments(normalized.map(p=>p.method)),receiptCount:0,documentCount:0,receiptDelivered:false,receiptAcknowledged:false,notes:text(body.notes,600),
+      bankStatus:bankStatusForPayments(monetary.map(p=>p.method)),receiptCount:0,documentCount:0,receiptDelivered:false,receiptAcknowledged:false,notes:text(body.notes,600),
       createdBy:actor,createdAt:now,updatedAt:now,contractVersion:'ops.purchases.v0.1'});
-    for(const pay of normalized){
+    for(const pay of monetary){
       const paymentRef=store.collection('ops_payments').doc(docId(site));
       batch.create(paymentRef,{siteId:site,purchaseId:id,amountCents:pay.amountCents,method:pay.method,reference:pay.reference,
         reconciliationStatus:['cash','credit_note'].includes(pay.method)?'not_applicable':'pending',paidDate:date,createdBy:actor,createdAt:now});
     }
-    batch.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId:id,action:'purchase.created',actor,createdAt:now});
+    if(creditNoteCents>0){const creditRef=store.collection('ops_supplier_credit_notes').doc(docId(site));
+      batch.create(creditRef,{siteId:site,supplierId,purchaseId:id,amountCents:creditNoteCents,notes:'Crédito comercial, no pago recibido',createdAt:now});}
+    batch.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId:id,folio,action:'purchase.created',actor,createdAt:now});
     await batch.commit();
-    return NextResponse.json({ok:true,id});
+    return NextResponse.json({ok:true,id,folio});
+  }
+  if(action==='purchase.update'||action==='purchase.cancel'){
+    const id=text(body.purchaseId,130),ref=store.collection('ops_purchases').doc(id);
+    const found=await ref.get(),purchase=found.data();
+    if(!purchase||purchase.siteId!==site||purchase.cancelled===true)throw new Error('PURCHASE_NOT_FOUND_OR_CANCELLED');
+    const [payments,receipts,documents]=await Promise.all([
+      store.collection('ops_payments').where('purchaseId','==',id).limit(1).get(),
+      store.collection('ops_receipts').where('purchaseId','==',id).limit(1).get(),
+      store.collection('ops_documents').where('purchaseId','==',id).limit(1).get()
+    ]);
+    const hasLinked=!payments.empty||!receipts.empty||!documents.empty||purchase.receiptCount>0||purchase.documentCount>0;
+    if(action==='purchase.cancel'){
+      if(hasLinked||purchase.receiptDelivered||purchase.receiptAcknowledged)throw new Error('PURCHASE_HAS_LINKED_RECORDS_CANNOT_CANCEL');
+      const batch=store.batch();
+      batch.update(ref,{cancelled:true,cancelledAt:now,updatedAt:now,cancelReason:text(body.reason,300)});
+      batch.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId:id,action:'purchase.cancelled',actor,createdAt:now});
+      await batch.commit();return NextResponse.json({ok:true});
+    }
+    const date=body.purchaseDate,totalCents=body.totalCents,supplierId=text(body.supplierId,130);
+    if(!opsDate(date)||!validMoneyCents(totalCents))throw new Error('INVALID_PURCHASE');
+    if(hasLinked&&(purchase.totalCents!==totalCents||purchase.supplierId!==supplierId))throw new Error('PURCHASE_HAS_LINKED_RECORDS_FINANCIAL_FIELDS_LOCKED');
+    if(totalCents<purchase.paidCents)throw new Error('TOTAL_BELOW_PAYMENTS');
+    const supplier=(await store.collection('ops_suppliers').doc(supplierId).get()).data();
+    if(!supplier||supplier.siteId!==site)throw new Error('INVALID_SUPPLIER');
+    const balanceCents=totalCents-purchase.paidCents;
+    const batch=store.batch();
+    batch.update(ref,{purchaseDate:date,totalCents,balanceCents,supplierId,supplierName:supplier.name,notes:text(body.notes,600),updatedAt:now});
+    batch.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId:id,action:'purchase.updated',actor,createdAt:now});
+    await batch.commit();return NextResponse.json({ok:true});
   }
   if(action==='payment.add'){
     const id=text(body.purchaseId,130),amount=body.amountCents,method=body.method,date=body.paidDate;
-    if(!validMoneyCents(amount)||!opsDate(date)||!['cash','debit_card','credit_card','credit_note','card','transfer','other'].includes(String(method)))throw new Error('INVALID_PAYMENT');
+    if(!validMoneyCents(amount)||!opsDate(date)||!['cash','debit_card','credit_card','card','transfer','other'].includes(String(method)))throw new Error('INVALID_PAYMENT');
     const ref=store.collection('ops_purchases').doc(id),payment=store.collection('ops_payments').doc(docId(site));
     await store.runTransaction(async tx=>{
       const snapshot=await tx.get(ref),p=snapshot.data();
@@ -157,6 +238,37 @@ export async function POST(req:NextRequest){
       tx.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId:id,action:'payment.registered',amountCents:amount,method,actor,createdAt:now});
     });
     return NextResponse.json({ok:true,id:payment.id});
+  }
+  if(action==='goods.complete'){
+    const purchaseId=text(body.purchaseId,140),ref=store.collection('ops_purchases').doc(purchaseId);
+    await store.runTransaction(async tx=>{
+      const purchase=(await tx.get(ref)).data();
+      if(!purchase||purchase.siteId!==site||purchase.cancelled===true||purchase.goodsStatus==='verified')throw new Error('INVALID_PURCHASE');
+      if(!(purchase.receiptCount>0))throw new Error('RECEIPT_ITEMS_REQUIRED');
+      tx.update(ref,{goodsStatus:'verified',goodsVerifiedBy:text(body.verifier,120)||actor,
+        goodsVerifiedAt:now,updatedAt:now});
+      tx.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId,action:'goods.closed',actor,createdAt:now});
+    });
+    return NextResponse.json({ok:true});
+  }
+  if(action==='bank.reconcile'||action==='bank.unreconcile'){
+    const purchaseId=text(body.purchaseId,140),reference=text(body.reference,140),reviewer=text(body.reviewer,120);
+    if(reference.trim().length<3||reviewer.trim().length<2)throw new Error('BANK_REFERENCE_AND_REVIEWER_REQUIRED');
+    const bankRows=await store.collection('ops_payments').where('purchaseId','==',purchaseId).get();
+    const eligible=bankRows.docs.filter(x=>['debit_card','credit_card','card','transfer','other'].includes(x.data().method));
+    if(eligible.length===0)throw new Error('NO_BANK_PAYMENT_TO_RECONCILE');
+    const ref=store.collection('ops_purchases').doc(purchaseId);
+    const folio=action==='bank.reconcile'?await nextOpsFolio(store,site,'CON'):null;
+    await store.runTransaction(async tx=>{
+      const p=(await tx.get(ref)).data();
+      if(!p||p.siteId!==site||p.cancelled===true)throw new Error('INVALID_PURCHASE');
+      if(action==='bank.reconcile'&&p.bankStatus==='reconciled'||action==='bank.unreconcile'&&p.bankStatus!=='reconciled')throw new Error('BANK_STATUS_ALREADY_APPLIED');
+      tx.update(ref,{bankStatus:action==='bank.reconcile'?'reconciled':'pending_reconciliation',
+        ...(folio?{bankReconciliationFolio:folio}:{}),
+        bankReference:reference,bankReviewer:reviewer,bankReviewedAt:now,updatedAt:now});
+      tx.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId,action,reference,reviewer,actor,createdAt:now});
+    });
+    return NextResponse.json({ok:true});
   }
   if(action==='goods.verify'){
     const id=text(body.purchaseId,130),verifier=text(body.verifier,120);
@@ -172,12 +284,13 @@ export async function POST(req:NextRequest){
   }
   if(action==='document.status'){
     const id=text(body.purchaseId,130),status=body.status,recipient=text(body.recipient,120)||actor;
-    if(!['delivered','received','rejected'].includes(String(status)))throw new Error('INVALID_HANDOFF');
+    if(!['delivered','received','rejected','captured','missing'].includes(String(status)))throw new Error('INVALID_HANDOFF');
     const ref=store.collection('ops_purchases').doc(id);
     await store.runTransaction(async tx=>{
       const doc=await tx.get(ref),p=doc.data();
-      if(!p||p.siteId!==site||!['captured','delivered','received','rejected'].includes(p.documentStatus))throw new Error('INVALID_DOCUMENT_STATE');
-      if((status==='received'||status==='rejected')&&p.documentStatus!=='delivered'||status==='delivered'&&!['captured','rejected'].includes(p.documentStatus))throw new Error('INVALID_DOCUMENT_STATE');
+      if(!p||p.siteId!==site||p.cancelled===true)throw new Error('INVALID_DOCUMENT_STATE');
+      // A physical original may be handed over without a photographed copy.
+      if(status==='captured'&&!(p.documentCount>0)||status==='missing'&&p.documentCount>0)throw new Error('INVALID_DOCUMENT_STATE');
       tx.update(ref,{documentStatus:status,receiptDelivered:status==='delivered'||status==='received',receiptAcknowledged:status==='received',updatedAt:now});
       tx.create(store.collection('ops_audit').doc(docId(site)),{siteId:site,purchaseId:id,action:'document.'+status,recipient,actor,createdAt:now});
     });
@@ -192,11 +305,11 @@ export async function POST(req:NextRequest){
     const product=(await store.collection('ops_products').doc(presentation.productId).get()).data();
     if(!product||product.siteId!==site||product.active!==true)throw new Error('INVALID_PRODUCT');
     const purchaseRef=store.collection('ops_purchases').doc(purchaseId);
-    const receiptRef=store.collection('ops_receipts').doc(docId(site));
+    const receiptRef=store.collection('ops_receipts').doc(docId(site)),folio=await nextOpsFolio(store,site,'REC');
     await store.runTransaction(async tx=>{
       const purchase=(await tx.get(purchaseRef)).data();
-      if(!purchase||purchase.siteId!==site)throw new Error('INVALID_PURCHASE');
-      tx.create(receiptRef,{siteId:site,purchaseId,productId:presentation.productId,productName:product.name,presentationId,
+      if(!purchase||purchase.siteId!==site||purchase.cancelled===true||purchase.goodsStatus==='verified')throw new Error('INVALID_PURCHASE');
+      tx.create(receiptRef,{siteId:site,folio,purchaseId,purchaseDate:purchase.purchaseDate,productId:presentation.productId,productName:product.name,presentationId,
         presentationLabel:presentation.label,packQuantity,receivedBaseAmount:Math.round(packQuantity*presentation.unitAmount*1e6)/1e6,
         unit:presentation.unit,lineTotalCents:lineTotalCents??null,createdBy:actor,createdAt:now});
       tx.update(purchaseRef,{goodsStatus:state,receiptCount:FieldValue.increment(1),updatedAt:now});

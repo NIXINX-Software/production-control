@@ -1,0 +1,385 @@
+'use client';
+import {useEffect,useMemo,useState} from 'react';
+import type {User} from 'firebase/auth';
+import {baseAmount,normalUnit,type OpsSnapshot,type OpsSite,type OpsUnit} from '@/lib/ops-contract';
+import {OPS_APPROVAL_AREAS,orderEstimate,effectiveBudgetRange,supplyStatusFor,
+ type OpsCostReportRow,type OpsOrder,type OpsOrderLine,type OpsApprovalArea} from '@/lib/ops-order-contract';
+import {PC_UNITS} from '@/lib/pc-units';
+
+type Panel='ordenes'|'planeacion'|'costos'|'proveedores';
+type Props={panel:Panel;site:OpsSite;data:OpsSnapshot;demo:boolean;user:User|null;workspace:'admin'|'compras'|'control'};
+type LedgerRow={supplierId:string;supplierName:string;balanceCents:number;invoices:number;totalPaidToSupplierCents:number};
+const money=(c:number|null|undefined)=>c===null||c===undefined?'Sin costo histórico':new Intl.NumberFormat('en-CA',{style:'currency',currency:'CAD'}).format(c/100);
+const today=()=>new Date().toLocaleDateString('en-CA',{timeZone:'America/Toronto'});
+const past=(days:number)=>{const d=new Date();d.setDate(d.getDate()-days);return d.toLocaleDateString('en-CA',{timeZone:'America/Toronto'});};
+const labels:{[key:string]:string}={draft:'Borrador',pending_owner:'Pendiente propietaria',returned:'Devuelta para corrección',approved:'Abierta / autorizada',closed:'Cerrada',pending:'Pendiente',partial:'Parcial',complete:'Completo'};
+function demoOrder(site:OpsSite,lines:OpsOrderLine[],from:string,to:string,budget:number,min:number,max:number,actor:string):OpsOrder{
+ return {id:site+'_'+crypto.randomUUID(),siteId:site,folio:site.toUpperCase()+'-OC-'+today().replaceAll('-','')+'-DEMO',
+  status:'draft',revision:1,from,to,lines,estimatedSubtotalCents:orderEstimate(lines),
+  requestedBudgetCents:budget,minPercent:min,maxPercent:max,...effectiveBudgetRange(budget,min,max),
+  approvals:{},createdBy:actor};
+}
+export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Props){
+ const [orders,setOrders]=useState<OpsOrder[]>([]),[costs,setCosts]=useState<OpsCostReportRow[]>([]);
+ const [accounts,setAccounts]=useState<LedgerRow[]>([]);
+ const [from,setFrom]=useState(past(30)),[to,setTo]=useState(today());
+ const [demoHydrated,setDemoHydrated]=useState(false);
+ const [previewDisabled,setPreviewDisabled]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
+ const [name,setName]=useState(''),[pId,setPId]=useState(''),[unit,setUnit]=useState<OpsUnit>('kg'),[quantity,setQuantity]=useState('');
+ const [lines,setLines]=useState<OpsOrderLine[]>([]),[budget,setBudget]=useState(''),[minPct,setMinPct]=useState('90'),[maxPct,setMaxPct]=useState('120');
+ const [revisionId,setRevisionId]=useState(''),[requiredDate,setRequiredDate]=useState(today());
+ const [comment,setComment]=useState(''),[paidSupplier,setPaidSupplier]=useState(''),[paidAmount,setPaidAmount]=useState(''),[paidRef,setPaidRef]=useState(''),[paidMethod,setPaidMethod]=useState('transfer');
+ const [supplies,setSupplies]=useState<Record<string,string>>({});
+ const [supplyNotes,setSupplyNotes]=useState<Record<string,string>>({});
+ const [demoProducts,setDemoProducts]=useState<{id:string;name:string;unit:'kg'|'l'|'unit'}[]>([]),[newDemoProduct,setNewDemoProduct]=useState('');
+ const demoOnly=demo||previewDisabled;
+ const allProducts=useMemo(()=>[
+   ...data.products.filter(x=>x.siteId===site&&x.active).map(x=>({id:x.id,name:x.name,unit:x.unit})),
+   ...(demoOnly?demoProducts:[])
+ ],[data.products,site,demoProducts,demoOnly]);
+ const selectedProduct=allProducts.find(x=>x.id===pId);
+ const allowedUnits=PC_UNITS.map(x=>x.id).filter(x=>selectedProduct&&normalUnit(x)===selectedProduct.unit);
+ const selectedAvg=costs.find(x=>x.productId===pId)?.avgCostCents??null;
+ const estimateSubtotal=orderEstimate(lines);
+ const approvedSubtotal=orders.filter(o=>o.status!=='closed').flatMap(o=>o.lines.filter(l=>l.ownerAccepted)).reduce((sum,l)=>sum+(l.requestedCents??0),0);
+ const validatedLineCount=orders.filter(o=>o.status!=='closed').flatMap(o=>o.lines).filter(l=>l.ownerAccepted).length;
+ const budgetCents=budget.trim()?Math.round(Number(budget)*100):lines.reduce((s,l)=>s+(l.requestedCents??0),0);
+ const minimum=Number(minPct),maximum=Number(maxPct);
+ const budgetBounds=Number.isFinite(budgetCents)&&Number.isFinite(minimum)&&Number.isFinite(maximum)?
+   effectiveBudgetRange(budgetCents,minimum,maximum):null;
+ const draftOrders=orders.filter(o=>['draft','returned','pending_owner'].includes(o.status));
+ const activeOrders=orders.filter(o=>o.status==='approved');
+ const closedOrders=orders.filter(o=>o.status==='closed');
+ const ownerOnly=workspace==='admin'&&Boolean(user);
+
+ async function get(path:string){
+  const response=await fetch(path,{cache:'no-store'});
+  const result=await response.json() as Record<string,unknown>;
+  if(!response.ok)throw new Error(String(result.error||'Error de consulta'));
+  return result;
+ }
+ async function fetchAll(){
+  if(demoOnly)return;
+  const [o,a]=await Promise.all([
+   get('/api/operations/orders?view=orders&site='+site),
+   get('/api/operations/suppliers?site='+site)
+  ]);
+  setOrders(o.orders as OpsOrder[]??[]);
+  setAccounts(a.rows as LedgerRow[]??[]);
+ }
+ useEffect(()=>{
+  if(!demoOnly)return;
+  let active=true;
+  Promise.resolve().then(()=>{
+   if(!active)return;
+   try{
+    const raw=sessionStorage.getItem('ops:orders:demo:'+site);
+    if(raw){const parsed=JSON.parse(raw) as {orders?:OpsOrder[];demoProducts?:{id:string;name:string;unit:'kg'|'l'|'unit'}[]};
+      if(Array.isArray(parsed.orders))setOrders(parsed.orders);
+      if(Array.isArray(parsed.demoProducts))setDemoProducts(parsed.demoProducts);
+    }
+   }catch{}
+   setDemoHydrated(true);
+  });
+  return ()=>{active=false;};
+ },[demoOnly,site]);
+ useEffect(()=>{
+  if(!demoOnly||!demoHydrated)return;
+  sessionStorage.setItem('ops:orders:demo:'+site,JSON.stringify({orders,demoProducts}));
+ },[demoOnly,demoHydrated,site,orders,demoProducts]);
+ useEffect(()=>{
+  if(demo)return;
+  let valid=true;
+  (async()=>{try{
+   const r=await get('/api/operations/orders?view=orders&site='+site);
+   if(!valid)return;setOrders(r.orders as OpsOrder[]??[]);setPreviewDisabled(false);setError('');
+  }catch(e){if(!valid)return;const message=e instanceof Error?e.message:String(e);
+   if(message==='OPS_PREVIEW_DISABLED'){setPreviewDisabled(true);setError('');}
+   else setError(message);
+  }})();
+  return ()=>{valid=false;};
+ },[site,demo]);
+ useEffect(()=>{
+  if(demoOnly)return;
+  let valid=true;
+  (async()=>{try{
+   const r=await get('/api/operations/orders?view=costs&site='+site+'&from='+from+'&to='+to);
+   if(valid)setCosts((r.rows as OpsCostReportRow[])??[]);
+  }catch(e){if(valid)setError(e instanceof Error?e.message:String(e));}})();
+  return ()=>{valid=false;};
+ },[site,from,to,demoOnly]);
+ useEffect(()=>{
+  if(demoOnly||panel!=='proveedores')return;
+  let valid=true;
+  get('/api/operations/suppliers?site='+site).then(r=>{if(valid)setAccounts(r.rows as LedgerRow[]??[]);})
+    .catch(e=>{if(valid)setError(e instanceof Error?e.message:String(e));});
+  return ()=>{valid=false;};
+ },[site,panel,demoOnly]);
+
+ async function call(action:string,payload:Record<string,unknown>,endpoint='/api/operations/orders',owner=false){
+  const token=owner&&user?await user.getIdToken():'';
+  const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},
+   body:JSON.stringify({siteId:site,action,actor:name,...payload})});
+  const answer=await r.json() as {error?:string;ok?:boolean;id?:string;folio?:string};
+  if(!r.ok)throw new Error(answer.error||'Error al guardar');
+  return answer;
+ }
+ async function act(fn:()=>Promise<void>){
+  setBusy(true);setError('');setNotice('');
+  try{await fn();setNotice('Cambios guardados correctamente.');}
+  catch(e){setError(e instanceof Error?e.message:String(e));}
+  finally{setBusy(false);}
+ }
+ function setPeriod(value:string){
+  const days=Number(value);setFrom(past(days));setTo(today());
+ }
+ function addLine(){
+  if(!selectedProduct||!allowedUnits.includes(unit)||!(Number(quantity)>0))throw new Error('Elige producto, unidad y cantidad.');
+  if(lines.some(x=>x.productId===pId))throw new Error('Este producto ya está en la orden.');
+  const base=baseAmount(Number(quantity),unit);
+  setLines(l=>[...l,{id:crypto.randomUUID(),productId:pId,productName:selectedProduct.name,
+   unit,quantity:Number(quantity),requestedBaseAmount:base,unitCostCents:selectedAvg,requestedCents:selectedAvg===null?0:Math.round(base*selectedAvg),lineApprovals:{},ownerAccepted:false,
+   estimateCents:selectedAvg===null?null:Math.round(base*selectedAvg),suppliedBaseAmount:0,supplyStatus:'pending'}]);
+  setPId('');setQuantity('');
+ }
+ async function saveOrder(){
+  if(budgetCents!==lines.reduce((s,l)=>s+(l.requestedCents??0),0))throw new Error('El presupuesto total debe coincidir con la suma solicitada por producto.');
+  if(!lines.length||!Number.isSafeInteger(budgetCents)||budgetCents<1||!Number.isFinite(minimum)||!Number.isFinite(maximum)||
+    minimum<0||minimum>100||maximum<100||maximum>300)throw new Error('Captura productos y presupuesto con márgenes válidos.');
+  if(demoOnly){
+   if(revisionId){
+    setOrders(o=>o.map(x=>x.id===revisionId?{...{...demoOrder(site,lines,from,to,budgetCents,minimum,maximum,name),requiredDate},
+     id:x.id,folio:x.folio,revision:x.revision+1}:x));
+   }else setOrders(o=>[{...demoOrder(site,lines,from,to,budgetCents,minimum,maximum,name),requiredDate},...o]);
+  }else{
+   await call(revisionId?'order.revise':'order.create',{...(revisionId?{orderId:revisionId}:{}),
+    from,to,requiredDate,lines:lines.map(x=>({productId:x.productId,quantity:x.quantity,unit:x.unit,requestedCents:x.requestedCents??0})),
+    requestedBudgetCents:budgetCents,minPercent:minimum,maxPercent:maximum});
+   await fetchAll();
+  }
+  setRevisionId('');setLines([]);setBudget('');
+ }
+ async function approveArea(order:OpsOrder,role:OpsApprovalArea){
+  if(name.trim().length<2)throw new Error('Captura el nombre de quien valida.');
+  if(demoOnly){
+   setOrders(list=>list.map(x=>x.id===order.id?{...x,approvals:{...x.approvals,
+    [role]:{name:name.trim(),revision:x.revision,at:new Date().toISOString()}}}:x));
+  }else{await call('order.approval',{orderId:order.id,role});await fetchAll();}
+ }
+ async function submit(order:OpsOrder){
+  if(!OPS_APPROVAL_AREAS.every(role=>order.approvals[role]?.revision===order.revision))throw new Error('Faltan validaciones.');
+  if(demoOnly)setOrders(list=>list.map(x=>x.id===order.id?{...x,status:'pending_owner'}:x));
+  else {await call('order.submit',{orderId:order.id});await fetchAll();}
+ }
+ async function ownerDecision(order:OpsOrder,decision:'approve'|'return'){
+  if(!demoOnly&&!ownerOnly)throw new Error('Aprobación reservada a Superadmin.');
+  if(decision==='return'&&comment.trim().length<3)throw new Error('Escribe el comentario de devolución.');
+  if(demoOnly)setOrders(list=>list.map(x=>x.id===order.id?{...x,status:decision==='approve'?'approved':'returned',
+   ownerComment:comment,approvals:decision==='return'?{}:x.approvals}:x));
+  else{await call('order.owner',{orderId:order.id,decision,comment},'/api/operations/orders',true);await fetchAll();}
+  setComment('');
+ }
+ function edit(order:OpsOrder){
+  setRevisionId(order.id);setLines(order.lines.map(x=>({...x,id:crypto.randomUUID(),suppliedBaseAmount:0,supplyStatus:'pending'})));
+  setFrom(order.from);setTo(order.to);setBudget((order.requestedBudgetCents/100).toFixed(2));
+  setMinPct(String(order.minPercent));setMaxPct(String(order.maxPercent));setRequiredDate(order.requiredDate??today());
+  setNotice('Edición de '+order.folio+': guarda la propuesta para reiniciar las validaciones.');
+ }
+ async function lineApproval(order:OpsOrder,line:OpsOrderLine,role:OpsApprovalArea){
+  if(name.trim().length<2)throw new Error('Identifica al responsable del área.');
+  if(demoOnly)setOrders(os=>os.map(o=>o.id!==order.id?o:{...o,lines:o.lines.map(l=>l.id===line.id?{...l,lineApprovals:{...l.lineApprovals,[role]:{name:name.trim(),at:new Date().toISOString(),revision:o.revision}},ownerAccepted:false}:l)}));
+  else {await call('order.line.approval',{orderId:order.id,lineId:line.id,role});await fetchAll();}
+ }
+ async function lineOwner(order:OpsOrder,line:OpsOrderLine,accepted:boolean){
+  if(!demoOnly&&!ownerOnly)throw new Error('La autorización de la propietaria requiere Superadmin.');
+  if(accepted&&!OPS_APPROVAL_AREAS.every(a=>line.lineApprovals?.[a]?.revision===order.revision))throw new Error('Faltan validaciones del producto.');
+  if(demoOnly)setOrders(os=>os.map(o=>o.id!==order.id?o:(()=>{
+   const next=o.lines.map(l=>l.id===line.id?{...l,ownerAccepted:accepted,ownerLineComment:comment}:l);
+   return {...o,lines:next,status:next.every(l=>l.ownerAccepted&&OPS_APPROVAL_AREAS.every(a=>l.lineApprovals?.[a]?.revision===o.revision))?'approved':'draft'};
+  })()));
+  else {await call('order.line.owner',{orderId:order.id,lineId:line.id,accepted,comment},'/api/operations/orders',true);await fetchAll();}
+  setComment('');
+ }
+ async function markSupply(order:OpsOrder,line:OpsOrderLine,amount:number,note=''){
+  if(amount<0||amount>line.quantity)throw new Error('La cantidad no puede superar lo solicitado.');
+  const suppliedBaseAmount=amount<=0?0:baseAmount(amount,line.unit);
+  if(demoOnly)setOrders(items=>items.map(o=>o.id===order.id?{...o,lines:o.lines.map(l=>l.id===line.id?{...l,
+   suppliedBaseAmount,supplyStatus:supplyStatusFor(l.requestedBaseAmount,suppliedBaseAmount),note}:l)}:o));
+  else{await call('order.supply',{orderId:order.id,lineId:line.id,suppliedBaseAmount,note});await fetchAll();}
+ }
+ async function close(order:OpsOrder){
+  const reason=window.prompt('¿Por qué das por atendida esta orden? (incluye faltantes si los hay)');
+  if(reason===null)return;
+  if(reason.trim().length<5)throw new Error('El motivo debe tener al menos cinco caracteres.');
+  if(!window.confirm('Cerrar '+order.folio+' y retirarla de órdenes abiertas?'))return;
+  if(demoOnly)setOrders(list=>list.map(x=>x.id===order.id?{...x,status:'closed',closeReason:reason,
+    closeResult:x.lines.every(l=>l.supplyStatus==='complete')?'complete':'with_pending'}:x));
+  else{await call('order.close',{orderId:order.id,reason});await fetchAll();}
+ }
+ async function paySupplier(){
+  const amountCents=Math.round(Number(paidAmount)*100);
+  if(!paidSupplier||!(amountCents>0)||paidRef.trim().length<3)throw new Error('Selecciona proveedor, importe y referencia.');
+  if(demoOnly)throw new Error('Los pagos reales solo están disponibles en producción, no en el Preview.');
+  await call('supplier.pay',{supplierId:paidSupplier,amountCents,method:paidMethod,paidDate:today(),reference:paidRef},'/api/operations/suppliers');
+  setPaidAmount('');setPaidRef('');await fetchAll();
+ }
+ return <section className="ops-module">
+  {demoOnly&&<p className="ops-demo-note">Vista de demostración aislada · sin lecturas ni escrituras en Firebase productivo. Los registros de prueba existen solo en esta pantalla.</p>}
+  {error&&<p className="ops-error" role="alert">{error}</p>}
+  {notice&&<p className="ops-saved-notice" role="status">{notice}</p>}
+  {panel==='costos'&&<div className="ops-card">
+   <h2>Consumo comprado · Productos maestros</h2>
+   <p className="ops-hint">Agrupación por producto maestro, independientemente del proveedor o presentación. Solo se promedian líneas con costo documentado; no se inventan precios.</p>
+   <div className="ops-grid-2"><label>Desde<input type="date" value={from} onChange={e=>setFrom(e.target.value)}/></label>
+    <label>Hasta<input type="date" value={to} onChange={e=>setTo(e.target.value)}/></label></div>
+   <div className="ops-report-list">
+    {costs.map(r=><div className="ops-report-row" key={r.productId}><strong>{r.productName}</strong>
+     <span>{r.quantity.toLocaleString('es-CA',{maximumFractionDigits:4})} {r.unit} · {money(r.amountCents)} acumulados</span>
+     <b>Promedio: {r.avgCostCents===null?'No disponible':money(r.avgCostCents)+'/'+r.unit}</b>
+     {r.unpricedLines>0&&<small>{r.unpricedLines} línea(s) sin costo: promedio no certificable</small>}
+    </div>)}
+    {!costs.length&&<p className="ops-hint">No hay recepciones con información de costo para este periodo.</p>}
+   </div>
+  </div>}
+  {panel==='planeacion'&&<>
+   <div className="ops-card">
+    <h2>{revisionId?'Corregir orden':'Preparar orden de compra'}</h2>
+    <p className="ops-hint">Solicita productos manualmente; las cantidades no se calculan del inventario. El costo histórico solo orienta el presupuesto.</p>
+    <label>Periodo de referencia<select onChange={e=>setPeriod(e.target.value)} defaultValue="30">
+      <option value="15">Últimos 15 días</option><option value="30">Últimos 30 días</option><option value="90">Últimos 90 días</option>
+      <option value="365">Últimos 12 meses</option></select></label>
+    <div className="ops-grid-2"><label>Desde<input type="date" value={from} onChange={e=>setFrom(e.target.value)}/></label>
+     <label>Hasta<input type="date" value={to} onChange={e=>setTo(e.target.value)}/></label></div>
+    {demoOnly&&allProducts.length===0&&<div className="ops-inline-editor">
+      <label>Producto de demostración<input placeholder="Nombre de producto maestro" value={newDemoProduct} onChange={e=>setNewDemoProduct(e.target.value)}/></label>
+      <button type="button" onClick={()=>{if(newDemoProduct.trim().length>1){setDemoProducts(p=>[...p,{id:'demo_'+crypto.randomUUID(),name:newDemoProduct.trim(),unit:'kg'}]);setNewDemoProduct('');}}}>Crear solo en memoria</button>
+     </div>}
+    <div className="ops-grid-2"><label>Fecha requerida de abastecimiento
+      <input type="date" value={requiredDate} onChange={e=>setRequiredDate(e.target.value)}/></label>
+      <label>Responsable<input placeholder="Nombre del preparador" value={name} onChange={e=>setName(e.target.value)}/></label></div>
+    <div className="ops-order-table-scroll" role="region" aria-label="Planeación de productos" tabIndex={0}><table className="ops-order-table ops-plan-sheet">
+     <thead><tr><th>Producto maestro</th><th>Cantidad</th><th>Unidad</th><th>Costo histórico / unidad</th><th>Subtotal estimado</th><th>Importe solicitado</th>{OPS_APPROVAL_AREAS.map(a=><th key={a}>{a==='inventarios'?'Inventario':a[0].toUpperCase()+a.slice(1)}</th>)}<th>Comentario de propietaria</th><th>Autoriza</th><th></th></tr></thead>
+     <tbody>
+     {lines.map(line=><tr key={line.id}>
+       <td><strong>{line.productName}</strong></td>
+       <td><input aria-label={'Cantidad '+line.productName} type="number" min="0.001" step="any" value={line.quantity} onChange={e=>{const n=Number(e.target.value);if(!(n>0))return;const base=baseAmount(n,line.unit);setLines(ls=>ls.map(l=>l.id===line.id?{...l,quantity:n,requestedBaseAmount:base,estimateCents:l.unitCostCents===null?null:Math.round(base*l.unitCostCents),lineApprovals:{},ownerAccepted:false}:l));}}/></td>
+       <td><select aria-label={'Unidad '+line.productName} value={line.unit} onChange={e=>{const u=e.target.value as OpsUnit;const base=baseAmount(line.quantity,u);setLines(ls=>ls.map(l=>l.id===line.id?{...l,unit:u,requestedBaseAmount:base,estimateCents:l.unitCostCents===null?null:Math.round(base*l.unitCostCents),lineApprovals:{},ownerAccepted:false}:l));}}>{PC_UNITS.filter(u=>normalUnit(u.id)===normalUnit(line.unit)).map(u=><option key={u.id} value={u.id}>{u.es}</option>)}</select></td>
+       <td>{money(line.unitCostCents)} / {normalUnit(line.unit)}</td><td><strong>{money(line.estimateCents)}</strong></td>
+       <td><input aria-label={'Importe solicitado '+line.productName} type="number" min="0" step="0.01" value={line.requestedCents===undefined?'':String(line.requestedCents/100)} onChange={e=>{const value=e.target.value;setLines(ls=>ls.map(l=>l.id===line.id?{...l,requestedCents:Math.round(Number(value)*100),lineApprovals:{},ownerAccepted:false}:l));}}/></td>
+       {OPS_APPROVAL_AREAS.map(a=><td key={a} className="ops-approval-cell"><input type="checkbox" aria-label={a+' '+line.productName} checked={false} disabled title="Las validaciones se registran sobre la propuesta guardada, con auditoría."/></td>)}
+       <td><span className="ops-hint">Pendiente de revisión</span></td><td className="ops-approval-cell"><input type="checkbox" checked={false} disabled aria-label={'Autorización final '+line.productName}/></td>
+       <td><button type="button" aria-label={'Quitar '+line.productName} onClick={()=>setLines(ls=>ls.filter(l=>l.id!==line.id))}>×</button></td>
+      </tr>)}
+      <tr className="ops-plan-entry">
+       <td><select aria-label="Producto maestro nuevo" value={pId} onChange={e=>{setPId(e.target.value);const p=allProducts.find(x=>x.id===e.target.value);if(p)setUnit(p.unit);}}><option value="">+ Seleccionar producto</option>{allProducts.filter(p=>!lines.some(l=>l.productId===p.id)).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></td>
+       <td><input aria-label="Cantidad nueva" type="number" min="0.001" step="any" placeholder="0" value={quantity} onChange={e=>setQuantity(e.target.value)}/></td>
+       <td><select aria-label="Unidad nueva" disabled={!pId} value={unit} onChange={e=>setUnit(e.target.value as OpsUnit)}>{allowedUnits.map(u=><option key={u} value={u}>{PC_UNITS.find(x=>x.id===u)?.es??u}</option>)}</select></td>
+       <td>{money(selectedAvg)}{selectedProduct?' / '+selectedProduct.unit:''}</td>
+       <td>{selectedAvg===null?'Sin costo':money(Math.round(baseAmount(Number(quantity)||0,unit)*selectedAvg))}</td><td>—</td>
+       {OPS_APPROVAL_AREAS.map(a=><td key={a} className="ops-approval-cell">—</td>)}<td>—</td><td>—</td>
+       <td><button type="button" disabled={!pId||!(Number(quantity)>0)} onClick={()=>{try{addLine();}catch(e){setError(String(e));}}}>+ Añadir</button></td>
+      </tr>
+     </tbody>
+    </table></div>
+    <p className="ops-hint">Primero guarda la propuesta. Después, las áreas y la propietaria validarán los productos en la misma disposición de columnas; no se permiten aprobaciones ficticias en el borrador.</p>
+    {demoOnly&&<div className="ops-inline-editor"><label>Crear producto maestro de demostración<input value={newDemoProduct} onChange={e=>setNewDemoProduct(e.target.value)} placeholder="Nuevo producto" /></label><button type="button" onClick={()=>{if(newDemoProduct.trim().length>1){setDemoProducts(p=>[...p,{id:'demo_'+crypto.randomUUID(),name:newDemoProduct.trim(),unit:'kg'}]);setNewDemoProduct('');}}}>Crear en memoria</button></div>}
+    <div className="ops-payment-summary">
+      <div><span>Subtotal estimado</span><strong>{money(estimateSubtotal)}</strong></div>
+      <div><span>Subtotal solicitado</span><strong>{money(lines.reduce((s,l)=>s+(l.requestedCents??0),0))}</strong></div>
+      <div><span>Subtotal validado por todos</span><strong>{money(approvedSubtotal)} · {validatedLineCount}/{lines.length}</strong></div>
+    </div>
+    <p className="ops-hint">Estado de esta propuesta: En proceso hasta recibir las validaciones posteriores al guardado.</p>
+    <label>Presupuesto solicitado total (CAD)<input type="number" min="0.01" step="0.01" placeholder={String(lines.reduce((s,l)=>s+(l.requestedCents??0),0)/100)} value={budget} onChange={e=>setBudget(e.target.value)}/></label>
+    <h3>Margen autorizado sobre el presupuesto solicitado</h3>
+    <div className="ops-grid-2 ops-budget-sliders">
+     <label>Porcentaje mínimo: <strong>{minPct}%</strong>
+      <input aria-label="Porcentaje mínimo autorizado" type="range" min="0" max="100" step="5" value={minPct} onChange={e=>setMinPct(e.target.value)}/>
+      <strong>{money(budgetBounds?.minBudgetCents)}</strong>
+     </label>
+     <label>Porcentaje máximo: <strong>{maxPct}%</strong>
+      <input aria-label="Porcentaje máximo autorizado" type="range" min="100" max="300" step="5" value={maxPct} onChange={e=>setMaxPct(e.target.value)}/>
+      <strong>{money(budgetBounds?.maxBudgetCents)}</strong>
+     </label>
+    </div>
+    <p className="ops-hint">Controles independientes: cada barra tiene su propia escala y no modifica la otra. Rango permitido: {money(budgetBounds?.minBudgetCents)} – {money(budgetBounds?.maxBudgetCents)}.</p>
+    <label>Nombre del responsable que captura<input placeholder="Nombre" value={name} onChange={e=>setName(e.target.value)}/></label>
+    <button className="ops-primary" disabled={busy||!lines.length||!(budgetCents>0)} onClick={()=>void act(saveOrder)}>{revisionId?'Guardar revisión':'Crear propuesta'}</button>
+   </div>
+   <div className="ops-card"><h2>Validaciones y autorización</h2>
+    <p className="ops-hint">Las cuatro constancias internas requieren nombre del responsable. Como el personal no inicia sesión, su identidad aún no se verifica; la autorización final sí exige Superadmin.</p>
+    <label>Responsable que valida<input value={name} onChange={e=>setName(e.target.value)} placeholder="Nombre y apellido"/></label>
+    {draftOrders.map(order=><div className="ops-order-card" key={order.id}>
+      <div className="ops-section-title"><strong>{order.folio}</strong><span>{labels[order.status]}</span></div>
+      <p className="ops-hint">{order.lines.length} productos · presupuesto {money(order.requestedBudgetCents)} · estimado {money(order.estimatedSubtotalCents)}</p>
+      {order.ownerComment&&<p className="ops-hint">Comentario de propietaria: {order.ownerComment}</p>}
+      <p className="ops-hint">Fecha requerida: {order.requiredDate??'No registrada'} · Estado: {order.lines.every(l=>l.ownerAccepted)?'Liberada':order.lines.some(l=>l.ownerAccepted)?'Parcial':'En proceso'}</p>
+      <div className="ops-order-table-scroll"><table className="ops-order-table"><thead><tr><th>Producto</th><th>Cantidad</th><th>Solicitado</th>{OPS_APPROVAL_AREAS.map(a=><th key={a}>{a}</th>)}<th>Comentario propietaria</th><th>Autorizar</th></tr></thead>
+       <tbody>{order.lines.map(line=><tr key={line.id}><td>{line.productName}</td><td>{line.quantity} {line.unit}</td><td>{money(line.requestedCents??line.estimateCents)}</td>
+        {OPS_APPROVAL_AREAS.map(a=><td key={a}><input type="checkbox" aria-label={'Validar '+a+' '+line.productName} checked={line.lineApprovals?.[a]?.revision===order.revision} disabled={busy||order.status==='pending_owner'||Boolean(line.lineApprovals?.[a])||!name.trim()} onChange={()=>void act(()=>lineApproval(order,line,a))}/></td>)}
+        <td><textarea rows={2} aria-label={'Comentario propietaria '+line.productName} value={comment} onChange={e=>setComment(e.target.value)} disabled={busy||order.status==='pending_owner'}/><small>{line.ownerLineComment??''}</small></td>
+        <td><input type="checkbox" aria-label={'Autorizar '+line.productName} checked={Boolean(line.ownerAccepted)} disabled={busy||order.status==='pending_owner'||(!ownerOnly&&!demoOnly)||!OPS_APPROVAL_AREAS.every(a=>line.lineApprovals?.[a]?.revision===order.revision)} onChange={e=>void act(()=>lineOwner(order,line,e.target.checked))}/></td>
+       </tr>)}</tbody></table></div>
+      <div className="ops-payment-summary"><div><span>Subtotal autorizado por producto</span><strong>{money(order.lines.filter(l=>l.ownerAccepted).reduce((s,l)=>s+(l.requestedCents??0),0))}</strong></div></div>
+      {order.status!=='pending_owner'?<>
+       <div className="ops-approval-grid">{OPS_APPROVAL_AREAS.map(role=><button key={role} type="button" disabled={busy||!name.trim()||Boolean(order.approvals[role])}
+        onClick={()=>void act(()=>approveArea(order,role))}>{order.approvals[role]?'✓ ':'○ '}{role.toUpperCase()}{order.approvals[role]?': '+order.approvals[role]?.name:''}</button>)}</div>
+       {order.status==='returned'&&<button type="button" onClick={()=>edit(order)}>Corregir y reenviar</button>}
+       {order.status==='draft'&&<button type="button" disabled={busy||!OPS_APPROVAL_AREAS.every(role=>order.approvals[role]?.revision===order.revision)}
+         onClick={()=>void act(()=>submit(order))}>Enviar a propietaria</button>}
+      </>:<><p className="ops-hint">Esperando autorización final.</p>
+       {workspace==='admin'&&<div className="ops-inline-editor">
+        <label>Comentario de la propietaria<textarea rows={2} value={comment} onChange={e=>setComment(e.target.value)}/></label>
+        <div className="ops-catalog-actions"><button disabled={busy||!ownerOnly&&!demoOnly} onClick={()=>void act(()=>ownerDecision(order,'approve'))}>Autorizar</button>
+         <button disabled={busy||(!ownerOnly&&!demoOnly)||comment.trim().length<3} onClick={()=>void act(()=>ownerDecision(order,'return'))}>Devolver con observaciones</button></div>
+       </div>}
+      </>}
+     </div>)}
+    {!draftOrders.length&&<p className="ops-hint">Sin propuestas pendientes.</p>}
+   </div>
+  </>}
+  {panel==='ordenes'&&<>
+   <div className="ops-card"><h2>Órdenes de compra abiertas</h2>
+    <p className="ops-hint">Solo las autorizadas por la propietaria. Puedes cerrar una orden con faltantes sin borrar su historial.</p>
+    {activeOrders.map(order=><div key={order.id} className="ops-order-card">
+     <div className="ops-section-title"><strong>{order.folio}</strong><span>{labels[order.status]}</span></div>
+     <p className="ops-hint">Fecha requerida: {order.requiredDate??'Sin fecha'} · Solicitado {money(order.requestedBudgetCents)} · rango {money(order.minBudgetCents)} a {money(order.maxBudgetCents)}</p>
+     {order.lines.map(line=><div className="ops-supply-line" key={line.id}>
+      <strong>{line.productName}</strong><small>{line.quantity} {line.unit} pedidos · {labels[line.supplyStatus]}</small>
+      <div className="ops-supply-controls">
+       <label>Abastecidos ({line.unit})<input type="number" min="0" max={line.quantity} step="any"
+        value={supplies[line.id]??String(line.suppliedBaseAmount/(baseAmount(1,line.unit)))}
+        onChange={e=>setSupplies(x=>({...x,[line.id]:e.target.value}))}/></label>
+       <label>Estatus<select aria-label={'Estatus de abastecimiento '+line.productName} disabled={busy} value={line.supplyStatus} onChange={e=>{const val=e.target.value;const amount=val==='pending'?0:val==='complete'?line.quantity:Number(supplies[line.id]??0);void act(()=>markSupply(order,line,amount,supplyNotes[line.id]??line.note??''));}}>
+         <option value="pending">Pendiente</option><option value="partial">Parcial</option><option value="complete">Completo</option>
+       </select></label>
+       <label>Comentarios<input aria-label={'Observación de abastecimiento '+line.productName} value={supplyNotes[line.id]??line.note??''} onChange={e=>setSupplyNotes(x=>({...x,[line.id]:e.target.value}))}/></label>
+       <button type="button" disabled={busy} onClick={()=>void act(()=>markSupply(order,line,Number(supplies[line.id]??line.suppliedBaseAmount/baseAmount(1,line.unit)),supplyNotes[line.id]??line.note??''))}>Guardar abastecimiento</button>
+      </div>
+     </div>)}
+     <button className="ops-primary" disabled={busy} onClick={()=>void act(()=>close(order))}>Dar orden por atendida / cerrar</button>
+    </div>)}
+    {!activeOrders.length&&<p className="ops-hint">Sin órdenes abiertas. Las propuestas no autorizadas no se muestran aquí.</p>}
+   </div>
+   <details className="ops-card ops-order-history"><summary>Historial de órdenes cerradas ({closedOrders.length})</summary>
+    {closedOrders.map(o=><div className="ops-order-line" key={o.id}><span><strong>{o.folio}</strong><small>{o.closeResult==='complete'?'Atendida completa':'Atendida con faltantes'} · {o.closeReason}</small></span></div>)}
+   </details>
+  </>}
+  {panel==='proveedores'&&<div className="ops-card">
+   <h2>Cuentas por pagar a proveedores</h2>
+   <p className="ops-hint">Las notas de crédito originan saldo a cargo del proveedor, no un pago bancario. Un abono se registra contra el saldo del proveedor y se distribuye por antigüedad entre sus compras pendientes.</p>
+   {accounts.map(s=><div className="ops-report-row" key={s.supplierId}><strong>{s.supplierName}</strong><span>{s.invoices} compra(s) con saldo</span>
+    <b>Saldo: {money(s.balanceCents)}</b></div>)}
+   {!accounts.length&&<p className="ops-hint">Sin saldos consultables en esta empresa.</p>}
+   <div className="ops-divider"/>
+   <h3>Registrar pago al proveedor</h3>
+   <label>Proveedor<select value={paidSupplier} onChange={e=>setPaidSupplier(e.target.value)}><option value="">Selecciona proveedor</option>
+     {accounts.filter(x=>x.balanceCents>0).map(x=><option key={x.supplierId} value={x.supplierId}>{x.supplierName} · {money(x.balanceCents)}</option>)}</select></label>
+   <div className="ops-grid-2"><label>Abono (CAD)<input type="number" min="0.01" step="0.01" value={paidAmount} onChange={e=>setPaidAmount(e.target.value)}/></label>
+    <label>Medio<select value={paidMethod} onChange={e=>setPaidMethod(e.target.value)}><option value="transfer">Transferencia</option><option value="debit_card">Débito</option><option value="credit_card">Crédito</option><option value="cash">Efectivo</option><option value="other">Otro</option></select></label></div>
+   <label>Referencia del pago<input value={paidRef} onChange={e=>setPaidRef(e.target.value)} placeholder="Referencia bancaria o recibo"/></label>
+   <label>Responsable<input value={name} onChange={e=>setName(e.target.value)}/></label>
+   <button className="ops-primary" disabled={busy||!paidSupplier||!(Number(paidAmount)>0)||paidRef.trim().length<3} onClick={()=>void act(paySupplier)}>Registrar abono al proveedor</button>
+   <p className="ops-hint">Registrar un abono no lo marca automáticamente como conciliado con el banco.</p>
+  </div>}
+ </section>;
+}

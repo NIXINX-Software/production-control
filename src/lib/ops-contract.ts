@@ -1,3 +1,4 @@
+import {PC_UNITS} from './pc-units';
 /**
  * NIXINX Operations — first internal-process provider contract (candidate).
  * Independent from pc_products, pc_inputs, pc_counts and pc_movements.
@@ -6,8 +7,8 @@
 export const OPS_SITES = ['htl','htw','htft'] as const;
 export type OpsSite = typeof OPS_SITES[number];
 export const isOpsSite = (x:unknown):x is OpsSite => typeof x==='string' && OPS_SITES.some(s=>s===x);
-export const OPS_UNITS = ['kg','g','lb','l','ml','unit','portion'] as const;
-export type OpsUnit = typeof OPS_UNITS[number];
+export const OPS_UNITS = PC_UNITS.map(unit=>unit.id);
+export type OpsUnit = (typeof PC_UNITS)[number]['id'];
 export const OPS_MEASURE_TYPES = ['mass','volume','count'] as const;
 export type OpsMeasure = typeof OPS_MEASURE_TYPES[number];
 export function measureOf(unit:OpsUnit):OpsMeasure {
@@ -29,17 +30,17 @@ export function validDate(v:unknown):v is string {
     !Number.isNaN(Date.parse(v+'T12:00:00Z'))&&new Date(v+'T12:00:00Z').toISOString().slice(0,10)===v;
 }
 export const isRecord=(v:unknown):v is Record<string,unknown>=>v!==null&&typeof v==='object'&&!Array.isArray(v);
-export type OpsSupplier={id:string;siteId:OpsSite;name:string;active:boolean};
-export type OpsProduct={id:string;siteId:OpsSite;name:string;unit:'kg'|'l'|'unit';active:boolean};
-export type OpsPresentation={id:string;siteId:OpsSite;productId:string;label:string;packCount:number;packUnit:OpsUnit;unitAmount:number;unit:'kg'|'l'|'unit';active:boolean};
+export type OpsSupplier={id:string;siteId:OpsSite;name:string;active:boolean;folio?:string};
+export type OpsProduct={id:string;siteId:OpsSite;name:string;unit:'kg'|'l'|'unit';active:boolean;folio?:string};
+export type OpsPresentation={id:string;siteId:OpsSite;productId:string;label:string;packCount:number;packUnit:OpsUnit;unitAmount:number;unit:'kg'|'l'|'unit';active:boolean;folio?:string};
 export type OpsPurchase={
- id:string;siteId:OpsSite;purchaseDate:string;supplierId:string;supplierName:string;totalCents:number;currency:'CAD';
+ id:string;siteId:OpsSite;folio?:string;orderId?:string|null;supplierCreditCents?:number;purchaseDate:string;supplierId:string;supplierName:string;totalCents:number;currency:'CAD';
  paidCents:number;balanceCents:number;dueDate:string|null;goodsStatus:'pending'|'partial'|'received'|'verified'|'discrepancy';
  documentStatus:'missing'|'captured'|'delivered'|'received'|'rejected';bankStatus:'awaiting_payment'|'pending_reconciliation'|'not_applicable'|'reconciled';
- receiptCount:number;documentCount:number;receiptDelivered:boolean;receiptAcknowledged:boolean;notes:string;createdAt?:unknown;
+ receiptCount:number;documentCount:number;receiptDelivered:boolean;receiptAcknowledged:boolean;notes:string;cancelled?:boolean;createdAt?:unknown;
 };
 export type OpsPayment={id:string;siteId:OpsSite;purchaseId:string;amountCents:number;method:'cash'|'debit_card'|'credit_card'|'credit_note'|'card'|'transfer'|'other';reference?:string;reconciliationStatus:'not_applicable'|'pending';paidDate:string};
-export type OpsReceipt={id:string;siteId:OpsSite;purchaseId:string;productId:string;productName:string;presentationId:string;presentationLabel:string;packQuantity:number;receivedBaseAmount:number;unit:'kg'|'l'|'unit';lineTotalCents?:number|null;createdAt?:unknown};
+export type OpsReceipt={id:string;siteId:OpsSite;folio?:string;purchaseDate?:string;purchaseId:string;productId:string;productName:string;presentationId:string;presentationLabel:string;packQuantity:number;receivedBaseAmount:number;unit:'kg'|'l'|'unit';lineTotalCents?:number|null;createdAt?:unknown};
 export type OpsDocument={id:string;siteId:OpsSite;purchaseId:string;storagePath:string;mime:string;size:number;createdAt?:unknown};
 export type OpsSnapshot={products:OpsProduct[];suppliers:OpsSupplier[];presentations:OpsPresentation[];purchases:OpsPurchase[];payments:OpsPayment[];receipts:OpsReceipt[];documents:OpsDocument[]};
 export const EMPTY_OPS:OpsSnapshot={products:[],suppliers:[],presentations:[],purchases:[],payments:[],receipts:[],documents:[]};
