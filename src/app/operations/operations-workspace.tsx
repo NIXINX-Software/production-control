@@ -53,6 +53,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  const [user,setUser]=useState<User|null>(null),[email,setEmail]=useState(''),[password,setPassword]=useState('');
  const [busy,setBusy]=useState(false),[msg,setMsg]=useState(''),[selection,setSelection]=useState('');
  const [supplierId,setSupplierId]=useState(''),[total,setTotal]=useState(''),[purchaseDate,setPurchaseDate]=useState(dateToday());
+ const [editingPurchase,setEditingPurchase]=useState(''),[editSupplier,setEditSupplier]=useState(''),[editDate,setEditDate]=useState(''),[editTotal,setEditTotal]=useState(''),[editNotes,setEditNotes]=useState('');
  const [terms,setTerms]=useState(''),[tenders,setTenders]=useState<Tender[]>([]),[notes,setNotes]=useState('');
  const [historyOpen,setHistoryOpen]=useState(false),[historyLoaded,setHistoryLoaded]=useState(false),[recentSaved,setRecentSaved]=useState('');
  const [queryFrom,setQueryFrom]=useState(()=>{const d=new Date();d.setDate(d.getDate()-30);return d.toLocaleDateString('en-CA',{timeZone:'America/Toronto'});}),[queryTo,setQueryTo]=useState(dateToday());
@@ -284,6 +285,27 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
   }
   setNotes('');setTerms('');setTotal('');setTenders([]);setEvidence(null);setReceiptDeliveredAtPurchase(false);setRecentSaved('Compra guardada. Para consultarla o hacer seguimiento utiliza un periodo de fechas.');setHistoryLoaded(false);
  }
+ function openPurchaseEdit(p:OpsPurchase){
+  setSelection(p.id);setEditingPurchase(p.id);setEditSupplier(p.supplierId);setEditDate(p.purchaseDate);setEditTotal((p.totalCents/100).toFixed(2));setEditNotes(p.notes??'');
+ }
+ async function savePurchaseEdit(){
+  const p=active.purchases.find(x=>x.id===editingPurchase);
+  if(!p)throw new Error('No se encontró la compra.');
+  const amount=Math.round(Number(editTotal.replace(',','.'))*100);
+  if(!Number.isSafeInteger(amount)||amount<1||amount<p.paidCents)throw new Error('Importe inválido o inferior a los pagos registrados.');
+  if(mode==='live'){await request('purchase.update',{purchaseId:p.id,supplierId:editSupplier,purchaseDate:editDate,totalCents:amount,notes:editNotes});await refreshLive();}
+  else setData(d=>({...d,purchases:d.purchases.map(x=>x.id===p.id?{...x,supplierId:editSupplier,supplierName:active.suppliers.find(v=>v.id===editSupplier)?.name??x.supplierName,purchaseDate:editDate,totalCents:amount,balanceCents:amount-x.paidCents,notes:editNotes}:x)}));
+  setEditingPurchase('');setMsg('Compra actualizada.');
+ }
+ async function cancelPurchase(p:OpsPurchase){
+  const reason=window.prompt('Motivo de cancelación (la compra quedará en el historial):');
+  if(reason===null)return;
+  if(reason.trim().length<5)throw new Error('Indica un motivo de al menos 5 caracteres.');
+  if(!window.confirm('¿Confirmar la cancelación de esta compra? No se eliminará su auditoría.'))return;
+  if(mode==='live'){await request('purchase.cancel',{purchaseId:p.id,reason:reason.trim()});await refreshLive();}
+  else setData(d=>({...d,purchases:d.purchases.map(x=>x.id===p.id?{...x,cancelled:true}:x)}));
+  setEditingPurchase('');setMsg('Compra cancelada; historial conservado.');
+ }
  async function addPayment(){
   if(!selected)throw new Error('Selecciona una compra.');
   const cents=Math.round(Number(payAmount)*100);
@@ -455,10 +477,20 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
         </div>
         <button disabled={busy} onClick={()=>void work(consultHistory)}>Consultar periodo</button>
         {historyLoaded&&<><p className="ops-hint">{matchedRows.length} compra(s) en el periodo seleccionado</p>
-          <div className="ops-list">{matchedRows.map(p=><button key={p.id} className="ops-purchase" onClick={()=>{setSelection(p.id);if(workspace!=='compras')setTab('recepcion');}}>
+          <div className="ops-list">{matchedRows.map(p=><button key={p.id} className="ops-purchase" onClick={()=>{openPurchaseEdit(p);}}>
             <span><strong>{p.supplierName}</strong><small>{p.purchaseDate}</small></span>
-            <span className="ops-purchase-amount"><strong>{cash(p.totalCents)}</strong><small>{status(p.goodsStatus)}</small></span>
+            <span className="ops-purchase-amount"><strong>{cash(p.totalCents)}</strong><small>{p.cancelled?'Cancelada':status(p.goodsStatus)}</small></span>
           </button>)}</div>
+          {editingPurchase&&active.purchases.filter(p=>p.id===editingPurchase).map(p=><section key={p.id} className="ops-inline-editor ops-purchase-editor">
+            <div className="ops-section-title"><h3>Editar compra · {p.supplierName}</h3><button type="button" onClick={()=>setEditingPurchase('')}>Cerrar</button></div>
+            {p.cancelled?<p>Compra cancelada: registro de solo lectura.</p>:<>
+            <label>Proveedor<select value={editSupplier} onChange={e=>setEditSupplier(e.target.value)}>{active.suppliers.map(v=><option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
+            <div className="ops-grid-2"><label>Fecha<input type="date" value={editDate} onChange={e=>setEditDate(e.target.value)}/></label><label>Total (CAD)<input inputMode="decimal" value={editTotal} onChange={e=>setEditTotal(e.target.value)}/></label></div>
+            <label>Observaciones<textarea rows={2} value={editNotes} onChange={e=>setEditNotes(e.target.value)} maxLength={600}/></label>
+            <p className="ops-hint">Si la compra ya tiene pagos, comprobantes o recepciones, no podrán modificarse el proveedor ni el importe. Las correcciones quedan auditadas.</p>
+            <div className="ops-catalog-actions"><button type="button" disabled={busy} onClick={()=>void work(savePurchaseEdit)}>Guardar cambios</button><button type="button" disabled={busy} onClick={()=>void work(()=>cancelPurchase(p))}>Cancelar compra</button></div>
+            </>}
+           </section>)}
           {matchedRows.length===0&&<p className="ops-hint">No se encontraron compras en este periodo.</p>}
         </>}
       </div>}
