@@ -54,17 +54,25 @@ export async function POST(req:NextRequest){
   if(!isImage(buffer,mime))throw new Error('INVALID_FILE_TYPE');
   const documentId=site+'_'+randomUUID();
   const ext=mime==='image/jpeg'?'jpg':mime==='image/png'?'png':'webp';
-  // Company / ticket type / date of linked purchase order (or purchase date if no order).
+  // Organize documents as: company / purchase tickets / order date / order folio / receipt.
+  // Purchases without an order are kept under the dated "sin-orden" folder.
   const orderId=typeof purchase.orderId==='string'?purchase.orderId:'';
   const order=orderId?(await store.collection('ops_orders').doc(orderId).get()).data():null;
+  if(orderId&&!order)throw new Error('PURCHASE_ORDER_NOT_FOUND');
   if(order&&order.siteId!==site)throw new Error('INVALID_ORDER_SITE');
+  const orderFolio=order&&typeof order.folio==='string'&&/^[A-Z0-9-]{1,80}$/.test(order.folio)?order.folio:null;
+  if(order&&!orderFolio)throw new Error('INVALID_ORDER_FOLIO');
+  const orderDateFromFolio=orderFolio?.match(/-OC-(\d{4})(\d{2})(\d{2})-/);
+  const folioDate=orderDateFromFolio
+   ?[orderDateFromFolio[1],orderDateFromFolio[2],orderDateFromFolio[3]].join('-'):null;
   const folderDate=order?.createdAt instanceof Timestamp
-   ? torontoDay(order.createdAt.toDate())
-   : validDate(purchase.purchaseDate)?purchase.purchaseDate:null;
+   ?torontoDay(order.createdAt.toDate())
+   :order?folioDate
+   :validDate(purchase.purchaseDate)?purchase.purchaseDate:null;
   if(!folderDate||!validDate(folderDate))throw new Error('INVALID_PURCHASE_DATE');
   const purchaseFolio=typeof purchase.folio==='string'&&/^[A-Z0-9-]{1,80}$/.test(purchase.folio)?purchase.folio:purchaseId;
-  // The folio is readable while the document ID ensures multiple photos never overwrite one another.
-  const storagePath=[site.toUpperCase(),'tickets-de-compra',folderDate,purchaseFolio+'_'+documentId+'.'+ext].join('/');
+  // Each image retains the purchase folio plus a unique document ID to avoid overwrites.
+  const storagePath=[site.toUpperCase(),'tickets-de-compra',folderDate,orderFolio??'sin-orden',purchaseFolio+'_'+documentId+'.'+ext].join('/');
   const object=bucket.file(storagePath);
   await object.save(buffer,{resumable:false,metadata:{contentType:mime,cacheControl:'private,no-store',metadata:{sha256:createHash('sha256').update(buffer).digest('hex')}}});
   try{
