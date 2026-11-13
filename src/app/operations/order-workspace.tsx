@@ -146,15 +146,29 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
   if(budgetCents!==lines.reduce((s,l)=>s+(l.requestedCents??0),0))throw new Error('El presupuesto total debe coincidir con la suma solicitada por producto.');
   if(!lines.length||!Number.isSafeInteger(budgetCents)||budgetCents<1||!Number.isFinite(minimum)||!Number.isFinite(maximum)||
     minimum<0||minimum>100||maximum<100||maximum>300)throw new Error('Captura productos y presupuesto con márgenes válidos.');
+  const staged=lines.flatMap(l=>OPS_APPROVAL_AREAS.filter(a=>Boolean(l.lineApprovals?.[a])).map(role=>({productId:l.productId,role})));
+  if(staged.length&&name.trim().length<2)throw new Error('Identifica al responsable antes de validar áreas.');
   if(demoOnly){
    if(revisionId){
     setOrders(o=>o.map(x=>x.id===revisionId?{...{...demoOrder(site,lines,from,to,budgetCents,minimum,maximum,name),requiredDate},
      id:x.id,folio:x.folio,revision:x.revision+1}:x));
    }else setOrders(o=>[{...demoOrder(site,lines,from,to,budgetCents,minimum,maximum,name),requiredDate},...o]);
   }else{
-   await call(revisionId?'order.revise':'order.create',{...(revisionId?{orderId:revisionId}:{}),
+   const saved=await call(revisionId?'order.revise':'order.create',{...(revisionId?{orderId:revisionId}:{}),
     from,to,requiredDate,lines:lines.map(x=>({productId:x.productId,quantity:x.quantity,unit:x.unit,requestedCents:x.requestedCents??0})),
     requestedBudgetCents:budgetCents,minPercent:minimum,maxPercent:maximum});
+   if(staged.length){
+    const orderId=revisionId||saved.id;
+    if(!orderId)throw new Error('La orden se creó, pero no se recibió su ID para registrar aprobaciones.');
+    const response=await get('/api/operations/orders?view=orders&site='+site);
+    const serverOrder=(response.orders as OpsOrder[]).find(o=>o.id===orderId);
+    if(!serverOrder)throw new Error('No se pudo localizar la orden para registrar validaciones.');
+    for(const entry of staged){
+     const storedLine=serverOrder.lines.find(l=>l.productId===entry.productId);
+     if(!storedLine)throw new Error('No se encontró el producto para registrar su validación.');
+     await call('order.line.approval',{orderId,lineId:storedLine.id,role:entry.role});
+    }
+   }
    await fetchAll();
   }
   setRevisionId('');setLines([]);setBudget('');
@@ -266,7 +280,7 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
        <td><select aria-label={'Unidad '+line.productName} value={line.unit} onChange={e=>{const u=e.target.value as OpsUnit;const base=baseAmount(line.quantity,u);setLines(ls=>ls.map(l=>l.id===line.id?{...l,unit:u,requestedBaseAmount:base,estimateCents:l.unitCostCents===null?null:Math.round(base*l.unitCostCents),lineApprovals:{},ownerAccepted:false}:l));}}>{PC_UNITS.filter(u=>normalUnit(u.id)===normalUnit(line.unit)).map(u=><option key={u.id} value={u.id}>{u.es}</option>)}</select></td>
        <td>{money(line.unitCostCents)} / {normalUnit(line.unit)}</td><td><strong>{money(line.estimateCents)}</strong></td>
        <td><input aria-label={'Importe solicitado '+line.productName} type="number" min="0" step="0.01" value={line.requestedCents===undefined?'':String(line.requestedCents/100)} onChange={e=>{const value=e.target.value;setLines(ls=>ls.map(l=>l.id===line.id?{...l,requestedCents:Math.round(Number(value)*100),lineApprovals:{},ownerAccepted:false}:l));}}/></td>
-       {OPS_APPROVAL_AREAS.map(a=><td key={a} className="ops-approval-cell"><input type="checkbox" aria-label={a+' '+line.productName} checked={false} disabled title="Las validaciones se registran sobre la propuesta guardada, con auditoría."/></td>)}
+       {OPS_APPROVAL_AREAS.map(a=><td key={a} className="ops-approval-cell"><input type="checkbox" aria-label={a+' '+line.productName} checked={Boolean(line.lineApprovals?.[a])} onChange={e=>setLines(ls=>ls.map(l=>l.id===line.id?{...l,lineApprovals:{...l.lineApprovals,[a]:e.target.checked?{name:name.trim()||'Responsable pendiente',at:new Date().toISOString(),revision:1}:undefined},ownerAccepted:false}:l))} title="Se registra y audita al guardar la propuesta."/></td>)}
        <td><span className="ops-hint">Pendiente de revisión</span></td><td className="ops-approval-cell"><input type="checkbox" checked={false} disabled aria-label={'Autorización final '+line.productName}/></td>
        <td><button type="button" aria-label={'Quitar '+line.productName} onClick={()=>setLines(ls=>ls.filter(l=>l.id!==line.id))}>×</button></td>
       </tr>)}
@@ -275,13 +289,13 @@ export default function OrderWorkspace({panel,site,data,demo,user,workspace}:Pro
        <td><input aria-label="Cantidad nueva" type="number" min="0.001" step="any" placeholder="0" value={quantity} onChange={e=>setQuantity(e.target.value)}/></td>
        <td><select aria-label="Unidad nueva" disabled={!pId} value={unit} onChange={e=>setUnit(e.target.value as OpsUnit)}>{allowedUnits.map(u=><option key={u} value={u}>{PC_UNITS.find(x=>x.id===u)?.es??u}</option>)}</select></td>
        <td>{money(selectedAvg)}{selectedProduct?' / '+selectedProduct.unit:''}</td>
-       <td>{selectedAvg===null?'Sin costo':money(Math.round(baseAmount(Number(quantity)||0,unit)*selectedAvg))}</td><td>—</td>
-       {OPS_APPROVAL_AREAS.map(a=><td key={a} className="ops-approval-cell">—</td>)}<td>—</td><td>—</td>
+       <td>{selectedAvg===null?'Sin costo':Number(quantity)>0?money(Math.round(baseAmount(Number(quantity),unit)*selectedAvg)):money(0)}</td><td>—</td>
+       {OPS_APPROVAL_AREAS.map(a=><td key={a} className="ops-approval-cell"><input type="checkbox" aria-label={'Validación '+a+' pendiente de guardar'} checked={false} disabled title="Añade el producto y guarda la propuesta para poder validar cada área."/></td>)}<td>—</td><td className="ops-approval-cell"><input type="checkbox" aria-label="Autorización final pendiente de guardar" checked={false} disabled title="Requiere orden guardada y validación de las áreas."/></td>
        <td><button type="button" disabled={!pId||!(Number(quantity)>0)} onClick={()=>{try{addLine();}catch(e){setError(String(e));}}}>+ Añadir</button></td>
       </tr>
      </tbody>
     </table></div>
-    <p className="ops-hint">Primero guarda la propuesta. Después, las áreas y la propietaria validarán los productos en la misma disposición de columnas; no se permiten aprobaciones ficticias en el borrador.</p>
+    <p className="ops-hint">Marca las casillas de Compras, Inventarios, Cocina y Finanzas para preparar sus validaciones. Al guardar se registrarán y auditarán. La autorización final requiere a la propietaria autenticada sobre la orden guardada.</p>
     {demoOnly&&<div className="ops-inline-editor"><label>Crear producto maestro de demostración<input value={newDemoProduct} onChange={e=>setNewDemoProduct(e.target.value)} placeholder="Nuevo producto" /></label><button type="button" onClick={()=>{if(newDemoProduct.trim().length>1){setDemoProducts(p=>[...p,{id:'demo_'+crypto.randomUUID(),name:newDemoProduct.trim(),unit:'kg'}]);setNewDemoProduct('');}}}>Crear en memoria</button></div>}
     <div className="ops-payment-summary">
       <div><span>Subtotal estimado</span><strong>{money(estimateSubtotal)}</strong></div>
