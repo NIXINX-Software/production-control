@@ -47,16 +47,16 @@ export default function Operations(){
  const [scope,setScope]=useState<OpsSite[]>(['htl']),[data,setData]=useState<OpsSnapshot>(EMPTY_OPS);
  const [superadminVerified,setSuperadminVerified]=useState(false);
  const [user,setUser]=useState<User|null>(null),[email,setEmail]=useState(''),[password,setPassword]=useState('');
- const [busy,setBusy]=useState(false),[msg,setMsg]=useState(''),[selection,setSelection]=useState('htl_demo_credit');
- const [supplierId,setSupplierId]=useState('htl_charro'),[total,setTotal]=useState('500'),[purchaseDate,setPurchaseDate]=useState(dateToday());
+ const [busy,setBusy]=useState(false),[msg,setMsg]=useState(''),[selection,setSelection]=useState('');
+ const [supplierId,setSupplierId]=useState(''),[total,setTotal]=useState('500'),[purchaseDate,setPurchaseDate]=useState(dateToday());
  const [terms,setTerms]=useState('30'),[tenders,setTenders]=useState<Tender[]>([]),[notes,setNotes]=useState('');
  const [receiptDeliveredAtPurchase,setReceiptDeliveredAtPurchase]=useState(false),[inlineNewSupplier,setInlineNewSupplier]=useState(false),[inlineNewProduct,setInlineNewProduct]=useState(false),[inlineNewPresentation,setInlineNewPresentation]=useState(false);
  const [payAmount,setPayAmount]=useState(''),[payMethod,setPayMethod]=useState<OpsPayment['method']>('transfer');
  const [recipient,setRecipient]=useState(''),[evidence,setEvidence]=useState<File|null>(null),[existingEvidence,setExistingEvidence]=useState<File|null>(null);
  const [newSupplier,setNewSupplier]=useState(''),[newProduct,setNewProduct]=useState(''),[productUnit,setProductUnit]=useState<'kg'|'l'|'unit'>('kg');
- const [presentationProduct,setPresentationProduct]=useState('htl_feta'),[newPresentationLabel,setNewPresentationLabel]=useState('');
+ const [presentationProduct,setPresentationProduct]=useState(''),[newPresentationLabel,setNewPresentationLabel]=useState('');
  const [packCount,setPackCount]=useState('750'),[packUnit,setPackUnit]=useState<OpsUnit>('g');
- const [receivingProduct,setReceivingProduct]=useState('htl_feta'),[receivingPresentation,setReceivingPresentation]=useState('htl_feta_750'),[receivedPacks,setReceivedPacks]=useState('3'),[lineCost,setLineCost]=useState('');
+ const [receivingProduct,setReceivingProduct]=useState(''),[receivingPresentation,setReceivingPresentation]=useState(''),[receivedPacks,setReceivedPacks]=useState('3'),[lineCost,setLineCost]=useState('');
  const [receptionState,setReceptionState]=useState<'partial'|'received'>('received');
  useEffect(()=>{if(!auth)return;return onAuthStateChanged(auth,setUser);},[]);
  useEffect(()=>{
@@ -268,7 +268,7 @@ export default function Operations(){
   <header className="ops-header"><div className="ops-header-inner">
    <div><Link href="/" className="ops-back">← Production Control</Link><h1>Business Transformation <span>· Operaciones</span></h1></div>
    <div className="ops-header-right"><span className="ops-status">{currentTitle}</span>
-    <select aria-label="Modo de información" value={mode} onChange={e=>{setMode(e.target.value as ViewMode);setData(EMPTY_OPS);setSuperadminVerified(false);setTab('compras');setMsg('');}}>
+    <select aria-label="Modo de información" value={mode} onChange={e=>{setMode(e.target.value as ViewMode);setData(EMPTY_OPS);setSuperadminVerified(false);setTab('compras');setSelection('');setSupplierId('');setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');setMsg('');}}>
       <option value="demo">Demo segura</option><option value="live">Firestore autorizado</option></select>
    </div>
   </div></header>
