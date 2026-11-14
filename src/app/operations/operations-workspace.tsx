@@ -34,16 +34,25 @@ const statusText={
 } as Record<string,string>;
 const status=(v:string)=>statusText[v]||v;
 async function resizeEvidence(input:File):Promise<File>{
- if(!input.type.startsWith('image/'))throw new Error('Selecciona una fotografía del comprobante.');
+ if(!['image/jpeg','image/png','image/webp'].includes(input.type))throw new Error('Utiliza una fotografía JPG, PNG o WebP.');
  let bitmap:ImageBitmap;
  try{bitmap=await createImageBitmap(input);}catch{throw new Error('No se pudo procesar la imagen. Prueba con JPG, PNG o WebP.');}
- const max=1600,ratio=Math.min(1,max/Math.max(bitmap.width,bitmap.height));
- const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(bitmap.width*ratio));canvas.height=Math.max(1,Math.round(bitmap.height*ratio));
- const ctx=canvas.getContext('2d');if(!ctx){bitmap.close();throw new Error('No se pudo preparar la imagen.');}
- ctx.fillStyle='#ffffff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();
- const blob=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('No se pudo comprimir la imagen.')),'image/jpeg',0.74));
- if(blob.size>8*1024*1024)throw new Error('La imagen supera el límite de 8 MB.');
- return new File([blob],`comprobante-${Date.now()}.jpg`,{type:'image/jpeg'});
+ try{
+  // Compress on the buyer's device, before transfer or Storage billing.
+  // 1400px preserves legible thermal-ticket text while preventing oversized phone photos.
+  const longest=1400,ratio=Math.min(1,longest/Math.max(bitmap.width,bitmap.height));
+  const canvas=document.createElement('canvas');
+  canvas.width=Math.max(1,Math.round(bitmap.width*ratio));canvas.height=Math.max(1,Math.round(bitmap.height*ratio));
+  const ctx=canvas.getContext('2d');if(!ctx)throw new Error('No se pudo preparar la imagen.');
+  ctx.fillStyle='#ffffff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);
+  const encode=(quality:number)=>new Promise<Blob>((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('No se pudo comprimir el comprobante.')),'image/jpeg',quality));
+  let blob=await encode(0.78);
+  // Adapt quality only when necessary; retain readability instead of aggressively shrinking every ticket.
+  if(blob.size>450*1024)blob=await encode(0.68);
+  if(blob.size>700*1024)blob=await encode(0.56);
+  if(blob.size>8*1024*1024)throw new Error('La fotografía supera 8 MB incluso tras optimizarla.');
+  return new File([blob],`comprobante-${Date.now()}.jpg`,{type:'image/jpeg'});
+ }finally{bitmap.close();}
 }
 export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  const [tab,setTab]=useState<Panel>(workspace==='control'?'recepcion':'compras'),[mode,setMode]=useState<ViewMode>(workspace==='admin'?'demo':'live'),[site,setSite]=useState<OpsSite>('htl');
