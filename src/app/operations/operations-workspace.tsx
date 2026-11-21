@@ -64,6 +64,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  const [recipient,setRecipient]=useState(''),[evidence,setEvidence]=useState<File|null>(null),[existingEvidence,setExistingEvidence]=useState<File|null>(null);
  const [newSupplier,setNewSupplier]=useState(''),[newProduct,setNewProduct]=useState(''),[productUnit,setProductUnit]=useState<'kg'|'l'|'unit'>('kg');
  const [editingProduct,setEditingProduct]=useState<string|null>(null),[catalogSearch,setCatalogSearch]=useState('');
+ const [productSupplierIds,setProductSupplierIds]=useState<string[]>([]);
  const [presentationProduct,setPresentationProduct]=useState(''),[newPresentationLabel,setNewPresentationLabel]=useState('');
  const [editingPresentation,setEditingPresentation]=useState<string|null>(null);
  const [packCount,setPackCount]=useState(''),[packUnit,setPackUnit]=useState<OpsUnit>('g');
@@ -165,11 +166,20 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  const supplier=active.suppliers.find(x=>x.id===supplierId);
  const presentationProductObj=active.products.find(x=>x.id===presentationProduct);
  const eligibleUnits=PC_UNITS.map(u=>u.id).filter(u=>presentationProductObj&&normalUnit(u)===presentationProductObj.unit);
- const currentPresentation=active.presentations.find(x=>x.id===receivingPresentation&&x.productId===receivingProduct);
- const receivingProductObj=active.products.find(x=>x.id===receivingProduct);
- const receivingPresentations=active.presentations.filter(x=>x.productId===receivingProduct&&x.active);
+ const receivingProducts=active.products.filter(p=>p.active&&Boolean(selected)&&Array.isArray(p.supplierIds)&&p.supplierIds.includes(selected!.supplierId));
+ const receivingProductObj=receivingProducts.find(x=>x.id===receivingProduct);
+ const currentPresentation=receivingProductObj?active.presentations.find(x=>x.id===receivingPresentation&&x.productId===receivingProduct):undefined;
+ const receivingPresentations=receivingProductObj?active.presentations.filter(x=>x.productId===receivingProduct&&x.active):[];
  const nameKey=(value:string)=>value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('es').trim().replace(/\s+/g,' ');
  const alreadyExists=active.products.find(p=>nameKey(p.name)===nameKey(newProduct)&&p.id!==editingProduct);
+ const supplierPicker=<fieldset className="ops-supplier-picker">
+  <legend>Proveedores habilitados para este producto</legend>
+  <div className="ops-supplier-options">{active.suppliers.filter(s=>s.active).map(s=><label key={s.id}>
+   <input type="checkbox" checked={productSupplierIds.includes(s.id)} onChange={e=>setProductSupplierIds(ids=>e.target.checked?[...ids,s.id]:ids.filter(id=>id!==s.id))}/>
+   <span>{s.name}</span>
+  </label>)}</div>
+  <p className="ops-hint">Sin proveedores seleccionados, el producto no aparecerá al recibir mercancía.</p>
+ </fieldset>;
  const tenderTotalCents=tenders.reduce((sum,p)=>sum+(p.amount.trim()?Math.round(Number(p.amount.replace(',','.'))*100):0),0);
  const draftCents=total.trim()?Math.round(Number(total.replace(',','.'))*100):0;
  const creditTenderCents=tenders.filter(x=>x.method==='credit_note').reduce((v,x)=>v+Math.round(Number(x.amount.replace(',','.'))*100),0);
@@ -234,17 +244,22 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  async function addProduct(){
   if(newProduct.trim().length<2)throw new Error('Escribe el nombre del producto maestro.');
   if(alreadyExists)throw new Error('Este producto maestro ya existe. Selecciónalo y agrega la presentación que necesites.');
-  if(mode==='live'){const r=await request('product.add',{name:newProduct,unit:productUnit});await refreshLive();if(r.id){setPresentationProduct(r.id);setReceivingProduct(r.id);setReceivingPresentation('');setPackUnit(productUnit);}}
-  else{const id=genId(site);setData(d=>({...d,products:[...d.products,{id,siteId:site,name:newProduct.trim(),unit:productUnit,active:true}]}));setPresentationProduct(id);setReceivingProduct(id);setReceivingPresentation('');setPackUnit(productUnit);}
-  setNewProduct('');setInlineNewProduct(false);
+  if(productSupplierIds.some(id=>!active.suppliers.some(s=>s.id===id&&s.active)))throw new Error('Selecciona proveedores vigentes de esta empresa.');
+  const supplierIds=[...productSupplierIds];
+  if(mode==='live'){const r=await request('product.add',{name:newProduct,unit:productUnit,supplierIds});await refreshLive();if(r.id){setPresentationProduct(r.id);setReceivingProduct(selected&&supplierIds.includes(selected.supplierId)?r.id:'');setReceivingPresentation('');setPackUnit(productUnit);}}
+  else{const id=genId(site);setData(d=>({...d,products:[...d.products,{id,siteId:site,name:newProduct.trim(),unit:productUnit,active:true,supplierIds}]}));setPresentationProduct(id);setReceivingProduct(selected&&supplierIds.includes(selected.supplierId)?id:'');setReceivingPresentation('');setPackUnit(productUnit);}
+  setNewProduct('');setProductSupplierIds([]);setInlineNewProduct(false);
  }
  async function saveProductEdit(){
   if(!editingProduct)throw new Error('Selecciona el producto.');
   if(alreadyExists)throw new Error('Ya existe otro producto maestro con ese nombre.');
   if(newProduct.trim().length<2)throw new Error('Escribe un nombre válido.');
-  if(mode==='live'){await request('product.update',{productId:editingProduct,name:newProduct.trim(),unit:productUnit});await refreshLive();}
-  else setData(d=>({...d,products:d.products.map(p=>p.id===editingProduct?{...p,name:newProduct.trim(),unit:productUnit,active:true}:p)}));
-  setEditingProduct(null);setNewProduct('');
+  if(productSupplierIds.some(id=>!active.suppliers.some(s=>s.id===id&&s.active)))throw new Error('Selecciona proveedores vigentes de esta empresa.');
+  const supplierIds=[...productSupplierIds];
+  if(mode==='live'){await request('product.update',{productId:editingProduct,name:newProduct.trim(),unit:productUnit,supplierIds});await refreshLive();}
+  else setData(d=>({...d,products:d.products.map(p=>p.id===editingProduct?{...p,name:newProduct.trim(),unit:productUnit,active:true,supplierIds}:p)}));
+  if(receivingProduct===editingProduct&&(!selected||!supplierIds.includes(selected.supplierId))){setReceivingProduct('');setReceivingPresentation('');}
+  setEditingProduct(null);setNewProduct('');setProductSupplierIds([]);
  }
  async function removeProduct(id:string,kind:'delete'|'deactivate'){
   const target=active.products.find(p=>p.id===id);
@@ -256,7 +271,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
    if(kind==='delete'&&inUse)throw new Error('PRODUCT_IN_USE_DEACTIVATE_INSTEAD');
    setData(d=>({...d,products:kind==='delete'?d.products.filter(p=>p.id!==id):d.products.map(p=>p.id===id?{...p,active:false}:p)}));
   }
-  if(editingProduct===id){setEditingProduct(null);setNewProduct('');}
+  if(editingProduct===id){setEditingProduct(null);setNewProduct('');setProductSupplierIds([]);}
  }
  async function addPresentation(){
   if(!presentationProductObj)throw new Error('Selecciona el producto maestro.');
@@ -550,22 +565,25 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
    {tab==='recepcion'&&<div className="ops-layout">
     <section className="ops-card">
      <h2>Recibir mercancía</h2><p className="ops-hint">Selecciona la compra, agrega los productos que llegaron y confirma la entrada física. No hay conexión automática con las recetas de Producción.</p>
-     <label>Compra pendiente de recepción<select value={selected?.id??''} onChange={e=>{setSelection(e.target.value);setLineCost('');}}>
+     <label>Compra pendiente de recepción<select value={selected?.id??''} onChange={e=>{setSelection(e.target.value);setLineCost('');setReceivingProduct('');setReceivingPresentation('');setPresentationProduct('');setInlineNewProduct(false);setProductSupplierIds([]);}}>
       <option value="">Selecciona una compra pendiente</option>{active.purchases.filter(p=>p.goodsStatus!=='verified'&&!p.cancelled).map(p=><option key={p.id} value={p.id}>{p.folio??p.purchaseDate} · {p.supplierName} · {cash(p.totalCents)}</option>)}</select></label>
      {selected&&<div className="ops-receive-context"><strong>{selected.supplierName}</strong><span>Total de compra: {cash(selected.totalCents)}</span><span>Comprobante: {status(selected.documentStatus)}</span></div>}
      <div className="ops-divider"/>
-     <div className="ops-section-title"><h3>1 · Producto maestro</h3><button type="button" onClick={()=>setInlineNewProduct(!inlineNewProduct)}>{inlineNewProduct?'Cancelar':'+ Crear producto maestro'}</button></div>
-     <label>Producto maestro<select value={receivingProduct} onChange={e=>{const id=e.target.value;setReceivingProduct(id);setPresentationProduct(id);setReceivingPresentation('');const p=active.products.find(x=>x.id===id);if(p)setPackUnit(p.unit);}}>
-      <option value="">Selecciona el ingrediente o artículo</option>{active.products.filter(p=>p.active).map(p=><option key={p.id} value={p.id}>{p.name} ({p.unit})</option>)}</select></label>
+     <div className="ops-section-title"><h3>1 · Producto maestro</h3><button type="button" disabled={!selected} onClick={()=>{setInlineNewProduct(!inlineNewProduct);if(!inlineNewProduct){setEditingProduct(null);setNewProduct('');setProductSupplierIds(selected?[selected.supplierId]:[]);}}}>{inlineNewProduct?'Cancelar':'+ Crear producto maestro'}</button></div>
+     <label>Producto maestro<select value={receivingProductObj?.id??''} disabled={!selected} onChange={e=>{const id=e.target.value;setReceivingProduct(id);setPresentationProduct(id);setReceivingPresentation('');const p=receivingProducts.find(x=>x.id===id);if(p)setPackUnit(p.unit);}}>
+      <option value="">Selecciona el ingrediente o artículo</option>{receivingProducts.map(p=><option key={p.id} value={p.id}>{p.name} ({p.unit})</option>)}</select></label>
+     {selected&&receivingProducts.length===0&&<p className="ops-hint">No hay productos habilitados para {selected.supplierName}. Asígnalos desde Catálogos.</p>}
      <p className="ops-hint">Busca primero el producto maestro. Un mismo queso feta conserva su identidad aunque cambie el proveedor, la bolsa o el precio.</p>
      {inlineNewProduct&&<div className="ops-inline-editor">
       <h3>Crear un nuevo producto maestro</h3>
       <p className="ops-hint">Úsalo únicamente si el producto base no existe. Para diferentes tamaños o empaques utiliza <strong>+ Nueva presentación</strong>; el proveedor y el precio se conservan en la compra.</p>
       <label>Nombre del producto base<input value={newProduct} onChange={e=>setNewProduct(e.target.value)} placeholder="Ej. Queso feta"/></label>
       <label>Unidad de control<select value={productUnit} onChange={e=>setProductUnit(e.target.value as 'kg'|'l'|'unit')}><option value="kg">Masa (kg)</option><option value="l">Volumen (L)</option><option value="unit">Piezas</option></select></label>
+      {supplierPicker}
       {alreadyExists&&<p className="ops-duplicate-hint">Ya existe <strong>{alreadyExists.name}</strong> en esta empresa. Selecciónalo en lugar de duplicarlo.</p>}
       <button type="button" disabled={busy||newProduct.trim().length<2||Boolean(alreadyExists)} onClick={()=>void work(addProduct)}>Guardar producto maestro</button>
-      {alreadyExists&&<button type="button" onClick={()=>{setReceivingProduct(alreadyExists.id);setPresentationProduct(alreadyExists.id);setReceivingPresentation('');setPackUnit(alreadyExists.unit);setInlineNewProduct(false);setNewProduct('');}}>Utilizar {alreadyExists.name}</button>}
+      {alreadyExists&&selected&&alreadyExists.supplierIds?.includes(selected.supplierId)&&<button type="button" onClick={()=>{setReceivingProduct(alreadyExists.id);setPresentationProduct(alreadyExists.id);setReceivingPresentation('');setPackUnit(alreadyExists.unit);setInlineNewProduct(false);setNewProduct('');setProductSupplierIds([]);}}>Utilizar {alreadyExists.name}</button>}
+      {alreadyExists&&selected&&!alreadyExists.supplierIds?.includes(selected.supplierId)&&<p className="ops-hint">Para utilizar este producto con {selected.supplierName}, habilita ese proveedor en Catálogos.</p>}
      </div>}
      <div className="ops-divider"/>
      <div className="ops-section-title"><h3>2 · Presentación</h3><button type="button" disabled={!receivingProductObj} onClick={()=>{setPresentationProduct(receivingProduct);if(receivingProductObj)setPackUnit(receivingProductObj.unit);setInlineNewPresentation(!inlineNewPresentation);}}>{inlineNewPresentation?'Cancelar':'+ Nueva presentación'}</button></div>
@@ -646,12 +664,13 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
      <label>{editingProduct?'Editar producto maestro':'Nuevo producto maestro'}<input value={newProduct} onChange={e=>setNewProduct(e.target.value)} placeholder="Ej. Queso feta"/></label>
      <label>Unidad base<select value={productUnit} onChange={e=>setProductUnit(e.target.value as 'kg'|'l'|'unit')}>
       <option value="kg">Kilogramos (masa)</option><option value="l">Litros (volumen)</option><option value="unit">Piezas (conteo)</option></select></label>
+     {supplierPicker}
      {alreadyExists&&<p className="ops-duplicate-hint">Este producto maestro ya existe: {alreadyExists.name}. Selecciónalo en la lista de presentaciones.</p>}
      <button disabled={busy||newProduct.trim().length<2||Boolean(alreadyExists)} onClick={()=>void work(editingProduct?saveProductEdit:addProduct)}>{editingProduct?'Guardar cambios':'+ Crear producto maestro'}</button>
-     {editingProduct&&<button type="button" onClick={()=>{setEditingProduct(null);setNewProduct('');}}>Cancelar edición</button>}
+     {editingProduct&&<button type="button" onClick={()=>{setEditingProduct(null);setNewProduct('');setProductSupplierIds([]);}}>Cancelar edición</button>}
      <div className="ops-divider"/><h3>Productos existentes</h3>
      <input aria-label="Buscar producto maestro" placeholder="Buscar producto..." value={catalogSearch} onChange={e=>setCatalogSearch(e.target.value)}/>
-     <div className="ops-mini-list ops-catalog-products">{active.products.filter(p=>nameKey(p.name).includes(nameKey(catalogSearch))).map(p=><div key={p.id}><span><strong>{p.name}</strong><small>{p.unit} · {p.active?'Activo':'Inactivo'}</small></span><span className="ops-catalog-actions"><button type="button" disabled={busy} onClick={()=>{setEditingProduct(p.id);setNewProduct(p.name);setProductUnit(p.unit);}}>Editar</button>{p.active&&<button type="button" disabled={busy} onClick={()=>void work(()=>removeProduct(p.id,'deactivate'))}>Desactivar</button>}<button type="button" disabled={busy} onClick={()=>void work(()=>removeProduct(p.id,'delete'))}>Eliminar</button></span></div>)}</div>
+     <div className="ops-mini-list ops-catalog-products">{active.products.filter(p=>nameKey(p.name).includes(nameKey(catalogSearch))).map(p=><div key={p.id}><span><strong>{p.name}</strong><small>{p.unit} · {p.active?'Activo':'Inactivo'} · {active.suppliers.filter(s=>p.supplierIds?.includes(s.id)).map(s=>s.name).join(', ')||'Sin proveedores'}</small></span><span className="ops-catalog-actions"><button type="button" disabled={busy} onClick={()=>{setEditingProduct(p.id);setNewProduct(p.name);setProductUnit(p.unit);setProductSupplierIds(Array.isArray(p.supplierIds)?p.supplierIds:[]);}}>Editar</button>{p.active&&<button type="button" disabled={busy} onClick={()=>void work(()=>removeProduct(p.id,'deactivate'))}>Desactivar</button>}<button type="button" disabled={busy} onClick={()=>void work(()=>removeProduct(p.id,'delete'))}>Eliminar</button></span></div>)}</div>
     </section>
     <section className="ops-card"><h2>Presentaciones por producto</h2>
      <label>Producto maestro<select value={presentationProduct} onChange={e=>{setPresentationProduct(e.target.value);const p=active.products.find(x=>x.id===e.target.value);if(p)setPackUnit(p.unit);}}>
