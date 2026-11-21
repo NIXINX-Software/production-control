@@ -24,6 +24,13 @@ const invalid=(v:unknown)=>typeof v!=='string'||v.length<2;
 const mapDocs=(s:FirebaseFirestore.QuerySnapshot)=>s.docs.map(d=>({id:d.id,...d.data()}));
 const siteRows=(store:Firestore,col:string,site:OpsSite)=>store.collection(col).where('siteId','==',site).limit(MAX_RESULTS).get();
 const docId=(site:OpsSite)=>site+'_'+crypto.randomUUID();
+async function validatedSupplierIds(store:Firestore,site:OpsSite,raw:unknown):Promise<string[]>{
+ if(!Array.isArray(raw)||raw.length>100||raw.some(id=>typeof id!=='string'||!/^[a-zA-Z0-9_-]{1,130}$/.test(id))||new Set(raw).size!==raw.length)throw new Error('INVALID_PRODUCT_SUPPLIERS');
+ const ids=raw as string[];
+ const suppliers=ids.length?await store.getAll(...ids.map(id=>store.collection('ops_suppliers').doc(id))):[];
+ if(suppliers.some(doc=>!doc.exists||doc.data()?.siteId!==site||doc.data()?.active!==true))throw new Error('INVALID_PRODUCT_SUPPLIERS');
+ return ids;
+}
 function fail(error:unknown){
  const message=error instanceof Error?error.message:'OPS_ERROR';
  const status=message==='ADMIN_AUTH_REQUIRED'?401:message==='SUPERADMIN_REQUIRED'||message==='ADMIN_ROLE_REQUIRED'||message==='OPS_SITE_FORBIDDEN'||message==='FORBIDDEN'?403:
@@ -104,8 +111,9 @@ export async function POST(req:NextRequest){
   if(action==='product.add'){
     const name=text(body.name,120),unit=body.unit;
     if(invalid(name)||!['kg','l','unit'].includes(String(unit)))throw new Error('INVALID_PRODUCT');
+    const supplierIds=await validatedSupplierIds(store,site,body.supplierIds);
     const id=docId(site),folio=await nextOpsFolio(store,site,'PM');
-    await store.collection('ops_products').doc(id).create({siteId:site,folio,name,unit,active:true,createdAt:now,updatedAt:now});
+    await store.collection('ops_products').doc(id).create({siteId:site,folio,name,unit,supplierIds,active:true,createdAt:now,updatedAt:now});
     return NextResponse.json({ok:true,id});
   }
   if(action==='product.update'||action==='product.deactivate'||action==='product.delete'){
@@ -129,7 +137,8 @@ export async function POST(req:NextRequest){
     const name=text(body.name,120),unit=body.unit;
     if(invalid(name)||!['kg','l','unit'].includes(String(unit)))throw new Error('INVALID_PRODUCT');
     if(used&&unit!==product.unit)throw new Error('PRODUCT_UNIT_LOCKED_BY_HISTORY');
-    await ref.update({name,unit,active:true,updatedAt:now});
+    const supplierIds=await validatedSupplierIds(store,site,body.supplierIds);
+    await ref.update({name,unit,supplierIds,active:true,updatedAt:now});
     return NextResponse.json({ok:true});
   }
   if(action==='presentation.add'){
@@ -302,13 +311,15 @@ export async function POST(req:NextRequest){
     if(!Number.isFinite(packQuantity)||packQuantity<=0||packQuantity>100000||!['partial','received'].includes(String(state))||(lineTotalCents!==null&&lineTotalCents!==undefined&&!validMoneyCents(lineTotalCents,true)))throw new Error('INVALID_RECEIPT');
     const presentation=(await store.collection('ops_presentations').doc(presentationId).get()).data();
     if(!presentation||presentation.siteId!==site||presentation.active!==true)throw new Error('INVALID_PRESENTATION');
-    const product=(await store.collection('ops_products').doc(presentation.productId).get()).data();
-    if(!product||product.siteId!==site||product.active!==true)throw new Error('INVALID_PRODUCT');
+    const productRef=store.collection('ops_products').doc(presentation.productId);
     const purchaseRef=store.collection('ops_purchases').doc(purchaseId);
     const receiptRef=store.collection('ops_receipts').doc(docId(site)),folio=await nextOpsFolio(store,site,'REC');
     await store.runTransaction(async tx=>{
-      const purchase=(await tx.get(purchaseRef)).data();
+      const [purchaseDoc,productDoc]=await Promise.all([tx.get(purchaseRef),tx.get(productRef)]);
+      const purchase=purchaseDoc.data(),product=productDoc.data();
       if(!purchase||purchase.siteId!==site||purchase.cancelled===true||purchase.goodsStatus==='verified')throw new Error('INVALID_PURCHASE');
+      if(!product||product.siteId!==site||product.active!==true)throw new Error('INVALID_PRODUCT');
+      if(!Array.isArray(product.supplierIds)||!product.supplierIds.includes(purchase.supplierId))throw new Error('PRODUCT_SUPPLIER_NOT_ALLOWED');
       tx.create(receiptRef,{siteId:site,folio,purchaseId,purchaseDate:purchase.purchaseDate,productId:presentation.productId,productName:product.name,presentationId,
         presentationLabel:presentation.label,packQuantity,receivedBaseAmount:Math.round(packQuantity*presentation.unitAmount*1e6)/1e6,
         unit:presentation.unit,lineTotalCents:lineTotalCents??null,createdBy:actor,createdAt:now});
