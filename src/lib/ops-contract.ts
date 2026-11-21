@@ -31,7 +31,7 @@ export function validDate(v:unknown):v is string {
 }
 export const isRecord=(v:unknown):v is Record<string,unknown>=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 export type OpsSupplier={id:string;siteId:OpsSite;name:string;active:boolean;folio?:string};
-export type OpsProduct={id:string;siteId:OpsSite;name:string;unit:'kg'|'l'|'unit';active:boolean;folio?:string};
+export type OpsProduct={id:string;siteId:OpsSite;name:string;unit:'kg'|'l'|'unit';active:boolean;folio?:string;supplierIds?:string[]};
 export type OpsPresentation={id:string;siteId:OpsSite;productId:string;label:string;packCount:number;packUnit:OpsUnit;unitAmount:number;unit:'kg'|'l'|'unit';active:boolean;folio?:string};
 export type OpsPurchase={
  id:string;siteId:OpsSite;folio?:string;orderId?:string|null;supplierCreditCents?:number;purchaseDate:string;supplierId:string;supplierName:string;totalCents:number;currency:'CAD';
