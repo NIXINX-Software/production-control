@@ -47,7 +47,7 @@ const server={
  audit:async()=>{},db:()=>store,findEmployee:async(id)=>({id:String(id),name:'Cocinero de prueba'}),
  newId:()=>`testid_${++sequence}`,operationalToday:()=> '2026-11-04',
  requireSameOrigin:()=>{},requireCorrectionCode:()=>{},requireSuperAdmin:async()=>{},
- safeSite:x=>x==='htl',stamp:()=>new Date('2026-11-04T15:00:00Z').toISOString(),
+ safeSite:tenant.isTenantSite,stamp:()=>new Date('2026-11-04T15:00:00Z').toISOString(),
  text:(v,max)=>typeof v==='string'?v.trim().slice(0,max||1000):'',
  validDate:v=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v),
  validSites:v=>Array.isArray(v)&&v.length>0&&v.every(tenant.isSiteId),
@@ -140,4 +140,21 @@ test('existing shared catalog record retains original metadata on an HTL-only ed
  const response=await post('catalog',{...common,id,name:'Legacy edited',productKind:'ingredient',defaultUnit:'kg'});
  assert.equal(response.status,200);
  assert.deepEqual(collectionData('pc_products').get(id).siteIds,['htl','htw']);
+});
+
+
+test('tenant guard rejects foreign site IDs; operations shares the same guard',()=>{
+ const ops=loadTypeScript('src/lib/ops-contract.ts',{'./pc-units':units,'./pc-tenant':tenant});
+ assert.equal(tenant.isTenantSite('htl'),true);
+ assert.equal(tenant.isTenantSite('htw'),false);
+ assert.equal(tenant.isTenantSite('htft'),false);
+ assert.equal(ops.isOpsSite('htl'),true);
+ assert.equal(ops.isOpsSite('htw'),false);
+ assert.equal(ops.isOpsSite(undefined),false);
+});
+test('foreign batch IDs cannot be used to register production',async()=>{
+ await makeDoc('pc_batches','foreign-batch').set({siteId:'htw',status:'active',productId:'carnitas',operationalDate:'2026-11-04'});
+ const rejected=await post('start',{batchId:'foreign-batch',employeeId:'cook'});
+ assert.equal(rejected.status,400);
+ assert.equal(collectionData('pc_activities').has('foreign-batch_cook'),false);
 });

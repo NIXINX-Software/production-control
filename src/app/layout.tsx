@@ -15,7 +15,7 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
   appleWebApp: {
     capable: true,
-    title: 'Production Control',
+    title: PC_TENANT.id==='htl'?'HT Production':'Production Control',
     statusBarStyle: 'default',
   },
   icons: {
