@@ -18,6 +18,8 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
+      - name: Instance isolation and existing production regression
+        run: node --test tests/*.test.cjs
       - name: Lint
         run: npm run lint
       - name: Production build verification

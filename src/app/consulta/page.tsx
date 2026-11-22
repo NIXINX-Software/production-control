@@ -1,4 +1,5 @@
 'use client';
+import {INSTANCE_SITE_ID,INSTANCE_SITE_NAME} from '@/lib/instance-site';
 import Link from 'next/link';
 import {pcOperationalDate} from '@/lib/pc-date';
 import {useCallback,useEffect,useMemo,useState,type CSSProperties} from 'react';
@@ -12,7 +13,6 @@ import './consulta.css';
 type Input={id:string;batchId:string;ingredientName:string;quantity:number;unit:string};
 type ResponseData={counts:ViewCount[];batches:ViewBatch[];inputs:Input[];movements:ViewMovement[];products:ViewProduct[]};
 type Mode='historico'|'simulacion';
-const locations=[{id:'htl',label:'Leamington'},{id:'htw',label:'Windsor'},{id:'htft',label:'Food Truck'}];
 const nowDay=()=>pcOperationalDate();
 const validDate=(s:string)=>/^\d{4}-\d{2}-\d{2}$/.test(s)&&!Number.isNaN(Date.parse(s+'T12:00:00Z'));
 const showQuantity=(n:number|null|undefined,u:string)=>n===null||n===undefined||!Number.isFinite(n)?'—':`${n.toLocaleString('es-CA',{maximumFractionDigits:3})} ${packUnitLabel(u)}`;
@@ -68,7 +68,8 @@ function TrendChart({series,mode,productName}:{series:ViewSeries;mode:Mode;produ
 
 export default function Consulta(){
  const [user,setUser]=useState<User|null>(null),[authReady,setAuthReady]=useState(false),[email,setEmail]=useState(''),[password,setPassword]=useState('');
- const [site,setSite]=useState('htl'),[from,setFrom]=useState(()=>shiftDay(nowDay(),-13)),[to,setTo]=useState(nowDay());
+ const site=INSTANCE_SITE_ID;
+ const [from,setFrom]=useState(()=>shiftDay(nowDay(),-13)),[to,setTo]=useState(nowDay());
  const [data,setData]=useState<ResponseData|null>(null),[loading,setLoading]=useState(false),[exporting,setExporting]=useState<'xlsx'|'datamart'|null>(null),[onlySelected,setOnlySelected]=useState(false),[error,setError]=useState('');
  const [productId,setProductId]=useState(''),[mode,setMode]=useState<Mode>('historico');
  useEffect(()=>{if(!auth){const timer=window.setTimeout(()=>setAuthReady(true),0);return()=>window.clearTimeout(timer);}return onAuthStateChanged(auth,u=>{setUser(u);setAuthReady(true);if(!u){setData(null);setProductId('');}});},[]);
@@ -111,7 +112,7 @@ export default function Consulta(){
   {!authReady&&<p>Comprobando acceso…</p>}
   {authReady&&!user&&<section className="ux-paper pc-consulta-login"><h2>Acceso de consulta</h2><p>Tu cuenta debe estar habilitada con el rol <code>viewer</code> o <code>admin</code>.</p><form onSubmit={async e=>{e.preventDefault();if(!auth)return;setError('');try{await signInWithEmailAndPassword(auth,email,password);setPassword('');}catch(err){setError(err instanceof Error?err.message:String(err));}}}><label>Correo<input type="email" value={email} autoComplete="username" onChange={e=>setEmail(e.target.value)} required/></label><label>Contraseña<input type="password" value={password} autoComplete="current-password" onChange={e=>setPassword(e.target.value)} required/></label><button className="ux-main-button" type="submit">Entrar</button></form></section>}
   {user&&<>
-   <div className="pc-period"><label>Sucursal<select value={site} onChange={e=>{setSite(e.target.value);setData(null);setProductId('');}}>{locations.map(l=><option key={l.id} value={l.id}>{l.label}</option>)}</select></label><label>Desde<input type="date" value={from} onChange={e=>{setFrom(e.target.value);setData(null);}} max={nowDay()}/></label><label>Hasta<input type="date" value={to} onChange={e=>{setTo(e.target.value);setData(null);}} max={nowDay()}/></label><button className="ux-main-button" disabled={invalid||loading} onClick={()=>void load()}>{loading?'Consultando…':'Consultar periodo'}</button><button className="ux-secondary" onClick={()=>{if(auth)void signOut(auth);}}>Salir</button></div>
+   <div className="pc-period"><label>Empresa<strong>{INSTANCE_SITE_NAME}</strong></label><label>Desde<input type="date" value={from} onChange={e=>{setFrom(e.target.value);setData(null);}} max={nowDay()}/></label><label>Hasta<input type="date" value={to} onChange={e=>{setTo(e.target.value);setData(null);}} max={nowDay()}/></label><button className="ux-main-button" disabled={invalid||loading} onClick={()=>void load()}>{loading?'Consultando…':'Consultar periodo'}</button><button className="ux-secondary" onClick={()=>{if(auth)void signOut(auth);}}>Salir</button></div>
    {data&&<>
     <section className="ux-paper pc-export-panel"><div><h2>Exportar información operativa</h2><p className="pc-consulta-subtitle">El Excel contiene existencias, conteos, producción, ingredientes, horas por empleado y movimientos. El ZIP contiene tablas CSV para Data Mart.</p></div><label className="pc-export-choice"><input type="checkbox" checked={onlySelected} onChange={e=>setOnlySelected(e.target.checked)} disabled={!selected}/> Exportar solo el producto seleccionado (por defecto: toda la sucursal)</label><div className="pc-export-buttons"><button className="ux-main-button" type="button" disabled={!!exporting} onClick={()=>void download('xlsx')}>{exporting==='xlsx'?'Generando Excel…':'Descargar Excel operativo (.xlsx)'}</button><button className="ux-secondary" type="button" disabled={!!exporting} onClick={()=>void download('datamart')}>{exporting==='datamart'?'Generando datos…':'Descargar datos Data Mart (.zip)'}</button></div><p className="pc-export-note">El Excel incluye columnas para capturar existencias verificadas. Ninguna descarga modifica los conteos guardados. Se utiliza el periodo y la sucursal consultados.</p></section>
     <section className="ux-paper"><div className="pc-chart-actions"><div><h2>Comportamiento del inventario</h2><p className="pc-consulta-subtitle">Selecciona la proteína o producto terminado que deseas analizar.</p></div></div>
@@ -129,7 +130,7 @@ export default function Consulta(){
     {selected&&<section className="ux-paper"><h2>Producción por fecha · {selected.name}</h2><div className="pc-table-scroll"><table className="pc-compact-table"><thead><tr><th>Fecha</th><th>Producto</th><th>Estado</th><th>Resultado final</th><th>Ingredientes</th></tr></thead><tbody>{selectedBatches.length?selectedBatches.map(b=><tr key={b.id}><td>{b.operationalDate}</td><td>{b.productName}</td><td>{b.status==='completed'?'Finalizado':'En curso'}</td><td>{b.status==='completed'?`${b.countableSnapshot===false?'':`${b.bagCount??0} bolsas · `}${showQuantity(b.outputAmount??b.outputKg??0,b.outputUnit??b.bagUnitSnapshot??'kg')}`:'—'}</td><td><details><summary>{data.inputs.filter(i=>i.batchId===b.id).length} registros</summary>{data.inputs.filter(i=>i.batchId===b.id).map(i=><div key={i.id}>{i.ingredientName}: {i.quantity} {i.unit}</div>)}</details></td></tr>):<tr><td colSpan={5}>Sin producciones de este producto durante el periodo.</td></tr>}</tbody></table></div></section>}
     {selected&&<section className="ux-paper"><h2>Salidas especiales · {selected.name}</h2>{selectedMovements.length===0?<p className="ux-muted">Sin movimientos durante el periodo.</p>:<div className="pc-table-scroll"><table className="pc-compact-table"><thead><tr><th>Fecha</th><th>Producto</th><th>Destino / Motivo</th><th>Cantidad</th></tr></thead><tbody>{selectedMovements.map(m=><tr key={m.id}><td>{m.operationalDate}</td><td>{m.productName}</td><td>{m.movementKind==='windsor'?'Windsor':m.movementKind}</td><td>{showQuantity(m.quantity??m.quantityKg??0,m.unit??'kg')}</td></tr>)}</tbody></table></div>}</section>}
    </>}
-   {!data&&!loading&&<p className="ux-muted">Selecciona sucursal y periodo y pulsa «Consultar periodo».</p>}
+   {!data&&!loading&&<p className="ux-muted">Selecciona el periodo y pulsa «Consultar periodo».</p>}
   </>}
   {error&&<p className="ux-warning" role="alert">{error}</p>}
  </main>;

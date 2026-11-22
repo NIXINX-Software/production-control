@@ -1,4 +1,5 @@
 'use client';
+import {INSTANCE_SITE_ID,INSTANCE_SITE_NAME} from '@/lib/instance-site';
 import {useEffect,useMemo,useState} from 'react';
 import Link from 'next/link';
 import {onAuthStateChanged,signInWithEmailAndPassword,signOut,type User} from 'firebase/auth';
@@ -15,7 +16,7 @@ type Workspace='admin'|'compras'|'control';
 type Tender={id:string;method:OpsPayment['method'];amount:string};
 const tenderMethods:{value:OpsPayment['method'];label:string}[]=[{value:'cash',label:'Efectivo'},{value:'debit_card',label:'Tarjeta de débito'},{value:'credit_card',label:'Tarjeta de crédito'},{value:'transfer',label:'Transferencia'},{value:'credit_note',label:'Nota de crédito del proveedor'},{value:'other',label:'Otro'}];
 type ViewMode='demo'|'live';
-const SITES:{id:OpsSite;name:string}[]=[{id:'htl',name:'Hot Tacos Leamington'},{id:'htw',name:'Hot Tacos Windsor'},{id:'htft',name:'Hot Tacos Food Truck'}];
+const INSTANCE_SCOPE:OpsSite[]=[INSTANCE_SITE_ID];
 const dateToday=()=>new Date().toLocaleDateString('en-CA',{timeZone:'America/Toronto'});
 const cash=(cents:number)=>new Intl.NumberFormat('en-CA',{style:'currency',currency:'CAD'}).format(cents/100);
 const genId=(s:OpsSite)=>s+'_'+crypto.randomUUID();
@@ -46,8 +47,9 @@ async function resizeEvidence(input:File):Promise<File>{
  return new File([blob],`comprobante-${Date.now()}.jpg`,{type:'image/jpeg'});
 }
 export default function Operations({workspace='admin'}:{workspace?:Workspace}){
- const [tab,setTab]=useState<Panel>(workspace==='control'?'recepcion':'compras'),[mode,setMode]=useState<ViewMode>(workspace==='admin'?'demo':'live'),[site,setSite]=useState<OpsSite>('htl');
- const [scope,setScope]=useState<OpsSite[]>(['htl']),[data,setData]=useState<OpsSnapshot>(EMPTY_OPS);
+ const [tab,setTab]=useState<Panel>(workspace==='control'?'recepcion':'compras'),[mode,setMode]=useState<ViewMode>(workspace==='admin'?'demo':'live');
+ const site:OpsSite=INSTANCE_SITE_ID,scope=INSTANCE_SCOPE;
+ const [data,setData]=useState<OpsSnapshot>(EMPTY_OPS);
  const [superadminVerified,setSuperadminVerified]=useState(false);
  const [workspaceAuthorized,setWorkspaceAuthorized]=useState(false),[workspaceError,setWorkspaceError]=useState('');
  const [workspaceRole,setWorkspaceRole]=useState<string|null>(null);
@@ -234,7 +236,6 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  const bankVerified=(p:OpsPurchase)=>p.bankStatus==='reconciled';
  async function work(job:()=>Promise<void>){setBusy(true);setMsg('');try{await job();setMsg(current=>current||'Operación completada.');}
   catch(e){setMsg('No se completó: '+(e instanceof Error?e.message:String(e)));}finally{setBusy(false);}}
- function chooseSite(v:OpsSite){setWorkspaceAuthorized(false);setWorkspaceRole(null);setSite(v);setScope([v]);setSuperadminVerified(false);if(tab==='datos')setTab('compras');setSelection('');setSupplierId('');setPurchaseOrderId('');setPurchaseOrderOptions([]);setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');setHistoryLoaded(false);setHistoryOpen(false);setRecentSaved('');}
  async function addSupplier(){
   if(newSupplier.trim().length<2)throw new Error('Escribe el nombre del proveedor.');
   if(mode==='live'){const result=await request('supplier.add',{name:newSupplier});await refreshLive();if(result.id)setSupplierId(result.id);}
@@ -444,7 +445,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  if(!accessReady)return <main className="ops ops-wrap"><section className="ops-card" style={{maxWidth:480,margin:'64px auto'}}>
   <h1>{workspace==='admin'?'Administración general':workspace==='compras'?'Registro de compras':'Control de recepción y conciliación'}</h1>
   <p className="ops-hint">La navegación entre áreas está reservada a Superadmin.</p>
-  <label>Empresa operativa<select value={site} onChange={e=>{setWorkspaceAuthorized(false);chooseSite(e.target.value as OpsSite);}}>{SITES.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
+  <label>Empresa operativa<strong>{INSTANCE_SITE_NAME}</strong></label>
   {user?<><p>Sesión: {user.email}</p><p role="alert">{workspaceError||'Verificando autorización…'}</p><button onClick={()=>void signOut(auth!)}>Cambiar de cuenta</button></>:
    <div className="ops-auth-form"><label>Correo<input type="email" value={email} onChange={e=>setEmail(e.target.value)}/></label>
    <label>Contraseña<input type="password" value={password} onChange={e=>setPassword(e.target.value)}/></label>
@@ -461,13 +462,11 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
   </div></header>
   <main className="ops-wrap">
    <div className="ops-toolbar">
-    <label>Empresa operativa<select value={site} onChange={e=>chooseSite(e.target.value as OpsSite)}>
-       {SITES.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
-    </select></label>
+    <label>Empresa operativa<strong>{INSTANCE_SITE_NAME}</strong></label>
     {workspace==="admin"&&<div className="ops-toolbar-note">Los catálogos operativos se consultan desde Firestore por empresa. En Demo se crean en memoria y no quedan guardados.</div>}
    </div>
    {workspace==='admin'&&!demoMode&&<div className="ops-auth">
-     {user?<div className="ops-flex"><span>Sesión: {user.email}</span><button onClick={()=>void work(()=>refreshLive())} disabled={busy}>Consultar empresas seleccionadas</button><button onClick={()=>{setSuperadminVerified(false);setShowroomAuthorized(false);setShowroomData(null);setData(EMPTY_OPS);setTab('compras');void signOut(auth!);}}>Salir</button></div>:
+     {user?<div className="ops-flex"><span>Sesión: {user.email}</span><button onClick={()=>void work(()=>refreshLive())} disabled={busy}>Consultar empresa</button><button onClick={()=>{setSuperadminVerified(false);setShowroomAuthorized(false);setShowroomData(null);setData(EMPTY_OPS);setTab('compras');void signOut(auth!);}}>Salir</button></div>:
       <div className="ops-auth-form"><strong>Acceso administrativo</strong><input aria-label="Correo" placeholder="Correo electrónico" type="email" value={email} onChange={e=>setEmail(e.target.value)}/>
        <input aria-label="Contraseña" placeholder="Contraseña" type="password" value={password} onChange={e=>setPassword(e.target.value)}/>
        <button disabled={busy||!email||!password} onClick={()=>void work(login)}>Iniciar sesión</button></div>}
@@ -710,8 +709,8 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
     <p className="ops-hint">La exportación corresponde únicamente a la empresa seleccionada. Las tablas y el contrato incremental para RAW → CORE → MART aún requieren certificación del dominio Procesos.</p>
    </section>}
    {tab==='kpis'&&<section className="ops-card"><h3>Alcance del reporte</h3>
-    <div className="ops-scope">{SITES.map(s=><label key={s.id}><input type="checkbox" checked={scope.includes(s.id)} onChange={e=>setScope(curr=>e.target.checked?[...curr,s.id]:curr.filter(x=>x!==s.id))}/>{s.name}</label>)}</div>
-    {!demoMode&&<p className="ops-hint">Para consultar varias empresas, selecciónalas y pulsa «Consultar empresas seleccionadas». El backend denegará cualquier empresa que no esté incluida en tus permisos.</p>}
+    <div className="ops-scope"><strong>{INSTANCE_SITE_NAME}</strong></div>
+    {!demoMode&&<p className="ops-hint">Los reportes se limitan a la empresa configurada en esta instalación.</p>}
    </section>}
    <footer className="ops-footer">Business Transformation · Vista de prueba · Producción y Conteo sin cambios</footer>
   </main>
