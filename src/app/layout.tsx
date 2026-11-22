@@ -1,8 +1,9 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import {PC_TENANT} from '@/lib/pc-tenant';
 
-const siteUrl = 'https://production-control-sable.vercel.app';
-const title = 'Hot Tacos | Production Control';
+const siteUrl = process.env.NEXT_PUBLIC_PC_APP_URL || (PC_TENANT.id==='htl'?'https://production-control-sable.vercel.app':`https://${PC_TENANT.id}.inventory-control.nixinx.app`);
+const title = `${PC_TENANT.name} | Production Control`;
 const description = 'Conteo de inventario y control de producción';
 const brandVersion = 'bt-20261015';
 
@@ -10,11 +11,11 @@ export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title,
   description,
-  applicationName: 'Hot Tacos Production Control',
+  applicationName: `${PC_TENANT.name} Production Control`,
   robots: { index: false, follow: false },
   appleWebApp: {
     capable: true,
-    title: 'HT Production',
+    title: 'Production Control',
     statusBarStyle: 'default',
   },
   icons: {

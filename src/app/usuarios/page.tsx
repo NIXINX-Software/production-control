@@ -1,4 +1,5 @@
 'use client';
+import {PC_TENANT} from '@/lib/pc-tenant';
 
 import {useCallback,useEffect,useState,type FormEvent} from 'react';
 import Link from 'next/link';
@@ -133,7 +134,7 @@ export default function Usuarios() {
 
   return <main className="pc-users-page">
     <header className="pc-users-header">
-      <div><p className="ux-eyebrow">HOT TACOS · PRODUCTION CONTROL</p><h1>Administrar usuarios de consulta</h1><p className="ux-muted">Solo superadministradores. Aquí no se crean administradores ni se modifican permisos del website.</p></div>
+      <div><p className="ux-eyebrow">{PC_TENANT.name} · PRODUCTION CONTROL</p><h1>Administrar usuarios de consulta</h1><p className="ux-muted">Solo superadministradores. Aquí no se crean administradores ni se modifican permisos del website.</p></div>
       <div className="pc-users-nav"><Link href="/">← Cocina / Management</Link><Link href="/consulta">Ir a Consulta</Link></div>
     </header>
     {!ready&&<p>Comprobando sesión…</p>}
