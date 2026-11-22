@@ -1,13 +1,14 @@
+import {INSTANCE_SITE_ID} from './instance-site';
 import {pcOperationalDate} from './pc-date';
 import {addDays,type ScenarioConfig,type DateRange} from './pc-forecast';
 import {validDate,safeSite} from './pc-server';
-export function getConfig(params:URLSearchParams):ScenarioConfig{
+export function getConfig(params:URLSearchParams,synthetic=false):ScenarioConfig{
  const today=pcOperationalDate();
  const historyTo=params.get('to')??today,historyFrom=params.get('from')??addDays(historyTo,-29);
  const baseTo=params.get('baseTo')??historyTo,baseFrom=params.get('baseFrom')??historyFrom;
- const siteId=params.get('site')??'htw',productId=params.get('product')??'';
+ const siteId=params.get('site')??(synthetic?'htw':INSTANCE_SITE_ID),productId=params.get('product')??'';
  const forecastDays=Number(params.get('days')??14);
- if(![historyTo,historyFrom,baseTo,baseFrom].every(validDate)||historyTo<historyFrom||baseTo<baseFrom||!safeSite(siteId)||!productId||productId.length>100||!Number.isInteger(forecastDays)||forecastDays<1||forecastDays>90)throw new Error('INVALID_REPORT_FILTER');
+ if(![historyTo,historyFrom,baseTo,baseFrom].every(validDate)||historyTo<historyFrom||baseTo<baseFrom||!(synthetic?siteId==='htw':safeSite(siteId))||!productId||productId.length>100||!Number.isInteger(forecastDays)||forecastDays<1||forecastDays>90)throw new Error('INVALID_REPORT_FILTER');
  const blockedUntil=params.get('blockedUntil')??undefined,blockReason=params.get('blockReason')??undefined;
  if(blockedUntil&&!validDate(blockedUntil)||blockReason&&blockReason.length>120)throw new Error('INVALID_BLOCK');
  const span=(a:string,b:string)=>Math.floor((Date.parse(b+'T12:00:00Z')-Date.parse(a+'T12:00:00Z'))/86400000);

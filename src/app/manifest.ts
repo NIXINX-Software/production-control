@@ -1,8 +1,9 @@
+import {INSTANCE_SITE_NAME} from '@/lib/instance-site';
 import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Hot Tacos Production Control',
+    name: `${INSTANCE_SITE_NAME} Production Control`,
     short_name: 'HT Production',
     description: 'Conteo de inventario y control de producción',
     id: '/',

@@ -1,8 +1,9 @@
+import {INSTANCE_SITE_NAME} from '@/lib/instance-site';
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
-const siteUrl = 'https://production-control-sable.vercel.app';
-const title = 'Hot Tacos | Production Control';
+const siteUrl = process.env.NEXT_PUBLIC_PC_SITE_URL || 'https://production-control-sable.vercel.app';
+const title = `${INSTANCE_SITE_NAME} | Production Control`;
 const description = 'Conteo de inventario y control de producción';
 const brandVersion = 'bt-20261015';
 
@@ -10,7 +11,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title,
   description,
-  applicationName: 'Hot Tacos Production Control',
+  applicationName: `${INSTANCE_SITE_NAME} Production Control`,
   robots: { index: false, follow: false },
   appleWebApp: {
     capable: true,

@@ -1,3 +1,4 @@
+import {INSTANCE_SITE_ID,isInstanceSite,isSiteIdentifier} from '@/lib/instance-site';
 import {pcOperationalDate} from './pc-date';
 import 'server-only';
 import {randomUUID,timingSafeEqual} from 'node:crypto';
@@ -6,10 +7,11 @@ import {getAuth} from 'firebase-admin/auth';
 import {FieldValue, getFirestore, type Firestore} from 'firebase-admin/firestore';
 import {isSuperAdminEmail} from '@/lib/super-admin';
 
-export type Site = 'htl' | 'htw' | 'htft';
-export const SITES: Site[] = ['htl', 'htw', 'htft'];
-export const safeSite = (value: unknown): value is Site => typeof value === 'string' && SITES.includes(value as Site);
-export const validSites = (value: unknown): value is Site[] => Array.isArray(value) && value.length > 0 && value.length <= 3 && value.every(safeSite) && new Set(value).size === value.length;
+export type Site = string;
+export const SITES: Site[] = [INSTANCE_SITE_ID];
+export const safeSite = isInstanceSite;
+// Preserve existing shared catalog metadata; this is NOT an authorization check.
+export const validSites = (value: unknown): value is Site[] => Array.isArray(value) && value.length > 0 && value.length <= 3 && value.every(isSiteIdentifier) && new Set(value).size === value.length;
 export const text = (value: unknown, max = 120) => typeof value === 'string' ? value.trim().slice(0, max) : '';
 export const validDate = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T12:00:00Z`)) && new Date(`${value}T12:00:00Z`).toISOString().slice(0, 10) === value;
 export const operationalToday = () => pcOperationalDate();
