@@ -1,4 +1,5 @@
 'use client';
+import {useCompanyProfile} from './company-profile';
 import {pcOperationalDate} from '@/lib/pc-date';
 
 import {useEffect,useState,type CSSProperties} from 'react';
@@ -18,6 +19,7 @@ function Gauge({value,label}:{value:number;label:string}){
 }
 
 export function ManagementDashboard({data,lang,email,onRefresh,onLogout,showcase=false}:{data:ManagementData;lang:Lang;email?:string;onRefresh:()=>void;onLogout?:()=>void;showcase?:boolean}){
+ const {profile}=useCompanyProfile();
  const es=lang==='es';
  const today=pcOperationalDate();
  const [from,setFrom]=useState(addDays(today,-29)),[to,setTo]=useState(today),[applied,setApplied]=useState({from:addDays(today,-29),to:today});
@@ -57,7 +59,7 @@ export function ManagementDashboard({data,lang,email,onRefresh,onLogout,showcase
   </div>
 
   <div className="mi-grid-two">
-   <section className="mi-panel"><div className="mi-panel-head"><div><p className="ux-eyebrow">{es?'POR OPERACIÓN':'BY OPERATION'}</p><h2>{es?'Indicadores de la empresa':'Company indicators'}</h2></div></div><div className="mi-site-table">{shown.bySite.map(row=><article key={row.siteId}><div className="mi-site-top"><div><strong>{row.siteName}</strong><small>{row.siteId.toUpperCase()}</small></div><b>{pct(row.countPairCompletionPct)}</b></div><div className="mi-bar"><span style={{width:`${Math.min(100,row.outputKg/maxOutput*100)}%`}}/></div><div className="mi-site-stats"><span>{num(row.outputKg,1)} kg {es?'producidos':'produced'}</span><span>{num(row.trackedLaborHours,1)} h</span><span>{num(row.estimatedConsumptionKg,1)} kg {es?'consumo est.':'est. usage'}</span><span>{row.activeBatches} {es?'abiertos':'open'}</span></div></article>)}</div></section>
+   <section className="mi-panel"><div className="mi-panel-head"><div><p className="ux-eyebrow">{es?'POR OPERACIÓN':'BY OPERATION'}</p><h2>{es?'Indicadores de la empresa':'Company indicators'}</h2></div></div><div className="mi-site-table">{shown.bySite.map(row=><article key={row.siteId}><div className="mi-site-top"><div><strong>{showcase?row.siteName:profile.name}</strong><small>{row.siteId.toUpperCase()}</small></div><b>{pct(row.countPairCompletionPct)}</b></div><div className="mi-bar"><span style={{width:`${Math.min(100,row.outputKg/maxOutput*100)}%`}}/></div><div className="mi-site-stats"><span>{num(row.outputKg,1)} kg {es?'producidos':'produced'}</span><span>{num(row.trackedLaborHours,1)} h</span><span>{num(row.estimatedConsumptionKg,1)} kg {es?'consumo est.':'est. usage'}</span><span>{row.activeBatches} {es?'abiertos':'open'}</span></div></article>)}</div></section>
    <section className="mi-panel"><div className="mi-panel-head"><div><p className="ux-eyebrow">{es?'EXCEPCIONES':'EXCEPTIONS'}</p><h2>{es?'Semáforo operativo':'Operational alerts'}</h2></div><span className={shown.alerts.some(a=>a.severity==='critical')?'mi-light red':shown.alerts.length?'mi-light yellow':'mi-light green'}>{shown.alerts.length}</span></div><div className="mi-alerts">{shown.alerts.length?shown.alerts.map((a,i)=><article key={`${a.kind}-${i}`} className={a.severity==='critical'?'critical':'warning'}><span className="mi-dot"/><div><strong>{a.title}</strong><small>{a.siteId.toUpperCase()} · {a.detail}</small></div></article>):<p className="mi-empty">{es?'Sin excepciones detectadas.':'No exceptions detected.'}</p>}</div></section>
   </div>
 

@@ -1,5 +1,5 @@
 'use client';
-import {PC_TENANT} from '@/lib/pc-tenant';
+import {useCompanyProfile} from '../company-profile';
 
 import {useCallback,useEffect,useState,type FormEvent} from 'react';
 import Link from 'next/link';
@@ -32,6 +32,7 @@ const message=(error:unknown)=>{
 };
 
 export default function Usuarios() {
+ const {profile}=useCompanyProfile();
   const [user,setUser]=useState<User|null>(null);
   const [ready,setReady]=useState(false);
   const [email,setEmail]=useState('');
@@ -134,7 +135,7 @@ export default function Usuarios() {
 
   return <main className="pc-users-page">
     <header className="pc-users-header">
-      <div><p className="ux-eyebrow">{PC_TENANT.name} · PRODUCTION CONTROL</p><h1>Administrar usuarios de consulta</h1><p className="ux-muted">Solo superadministradores. Aquí no se crean administradores ni se modifican permisos del website.</p></div>
+      <div><p className="ux-eyebrow">{profile.name} · PRODUCTION CONTROL</p><h1>Administrar usuarios de consulta</h1><p className="ux-muted">Solo superadministradores. Aquí no se crean administradores ni se modifican permisos del website.</p></div>
       <div className="pc-users-nav"><Link href="/">← Cocina / Management</Link><Link href="/consulta">Ir a Consulta</Link></div>
     </header>
     {!ready&&<p>Comprobando sesión…</p>}

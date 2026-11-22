@@ -1,4 +1,5 @@
 'use client';
+import {useCompanyProfile} from './company-profile';
 import {PC_TENANT} from '@/lib/pc-tenant';
 import {pcOperationalDate} from '@/lib/pc-date';
 import {useEffect,useState} from 'react';
@@ -48,7 +49,8 @@ function actualBatchHours(activities:Array<Record<string,unknown>>,batchId:strin
  return Math.round(milliseconds/36000)/100;
 }
 export function ForecastWorkbench({data,lang,showcase=false,historyFrom:initialFrom,historyTo:initialTo}:{data:ManagementData;lang:Lang;showcase?:boolean;historyFrom?:string;historyTo?:string}){
- const es=lang==='es';const site:Site=PC_TENANT.id;const [product,setProduct]=useState(showcase?'protein-01':'');
+ const es=lang==='es';const site:Site=PC_TENANT.id;
+ const {profile}=useCompanyProfile();const [product,setProduct]=useState(showcase?'protein-01':'');
  const [from,setFrom]=useState(initialFrom??addDays(today(),-29)),[to,setTo]=useState(initialTo??today());
  const [baseFrom,setBaseFrom]=useState(addDays(today(),-29)),[baseTo,setBaseTo]=useState(today());
  const [days,setDays]=useState(14),[excluded,setExcluded]=useState('');
@@ -87,7 +89,7 @@ export function ForecastWorkbench({data,lang,showcase=false,historyFrom:initialF
  return <section className="mi-panel forecast-workbench">
   <div className="mi-panel-head"><div><p className="ux-eyebrow">{es?'PRONÓSTICO Y PLANIFICACIÓN':'FORECAST & PLANNING'}</p><h2>{es?'Inventario, consumo y próximos ciclos':'Inventory, demand and future batches'}</h2><p className="ux-muted">{es?'Gráfica histórica y simulación separadas. El pronóstico no crea órdenes de compra ni lotes reales.':'Independent historical chart and scenario. The forecast does not create real orders.'}</p></div></div>
   <div className="forecast-filters">
-   <label>{es?'Sucursal':'Location'}<strong>{PC_TENANT.name}</strong></label>
+   <label>{es?'Sucursal':'Location'}<strong>{profile.name}</strong></label>
    <label>{es?'Proteína':'Product'}<select value={selectedProduct} disabled={showcase} onChange={e=>setProduct(e.target.value)}>{showcase?<option value="protein-01">Proteína P-01 · Demo</option>:<><option value="">{es?'Seleccionar':'Select'}</option>{availableProducts.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</>}</select></label>
    <label>{es?'Histórico desde':'History from'}<input type="date" value={from} onChange={e=>setFrom(e.target.value)}/></label>
    <label>{es?'Histórico hasta':'History to'}<input type="date" value={to} onChange={e=>setTo(e.target.value)}/></label>

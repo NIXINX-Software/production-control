@@ -1,4 +1,5 @@
 'use client';
+import {useCompanyProfile} from '../company-profile';
 import {PC_TENANT} from '@/lib/pc-tenant';
 import {useEffect,useMemo,useState} from 'react';
 import Link from 'next/link';
@@ -46,6 +47,7 @@ async function resizeEvidence(input:File):Promise<File>{
  return new File([blob],`comprobante-${Date.now()}.jpg`,{type:'image/jpeg'});
 }
 export default function Operations({workspace='admin'}:{workspace?:Workspace}){
+ const {profile}=useCompanyProfile();
  const [tab,setTab]=useState<Panel>(workspace==='control'?'recepcion':'compras'),[mode,setMode]=useState<ViewMode>(workspace==='admin'?'demo':'live');
  const site:OpsSite=PC_TENANT.id;
  const [data,setData]=useState<OpsSnapshot>(EMPTY_OPS);
@@ -445,7 +447,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  if(!accessReady)return <main className="ops ops-wrap"><section className="ops-card" style={{maxWidth:480,margin:'64px auto'}}>
   <h1>{workspace==='admin'?'Administración general':workspace==='compras'?'Registro de compras':'Control de recepción y conciliación'}</h1>
   <p className="ops-hint">La navegación entre áreas está reservada a Superadmin.</p>
-  <label>Empresa operativa<strong>{PC_TENANT.name}</strong></label>
+  <label>Empresa operativa<strong>{profile.name}</strong></label>
   {user?<><p>Sesión: {user.email}</p><p role="alert">{workspaceError||'Verificando autorización…'}</p><button onClick={()=>void signOut(auth!)}>Cambiar de cuenta</button></>:
    <div className="ops-auth-form"><label>Correo<input type="email" value={email} onChange={e=>setEmail(e.target.value)}/></label>
    <label>Contraseña<input type="password" value={password} onChange={e=>setPassword(e.target.value)}/></label>
@@ -454,7 +456,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
  </section></main>;
  return <div className="ops">
   <header className="ops-header"><div className="ops-header-inner">
-   <div>{canNavigate&&<nav className="ops-flex" aria-label="Navegación Superadmin"><Link href="/">Producción y Conteos</Link><Link href="/compras">Compras</Link><Link href="/control-operativo">Control operativo</Link><Link href="/operations">Administración general</Link></nav>}<h1>{workspace==='compras'?'Compras':workspace==='control'?'Recepción y conciliación':'Administración general'}</h1></div>
+   <div>{canNavigate&&<nav className="ops-flex" aria-label="Navegación Superadmin"><Link href="/">Producción y Conteos</Link><Link href="/compras">Compras</Link><Link href="/control-operativo">Control operativo</Link><Link href="/operations">Administración general</Link><Link href="/company-settings">Configuración de empresa</Link></nav>}<h1>{workspace==='compras'?'Compras':workspace==='control'?'Recepción y conciliación':'Administración general'}</h1></div>
    <div className="ops-header-right"><span className="ops-status">{currentTitle}</span>
     {workspace==='admin'&&<select aria-label="Modo de información" value={mode} onChange={e=>{setMode(e.target.value as ViewMode);setData(EMPTY_OPS);setSuperadminVerified(false);setTab('compras');setHistoryLoaded(false);setHistoryOpen(false);setRecentSaved('');setSelection('');setSupplierId('');setPurchaseOrderId('');setPurchaseOrderOptions([]);setPresentationProduct('');setReceivingProduct('');setReceivingPresentation('');setMsg('');}}>
       <option value="demo">Demo segura</option><option value="live">Firestore autorizado</option></select>}
@@ -462,7 +464,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
   </div></header>
   <main className="ops-wrap">
    <div className="ops-toolbar">
-    <label>Empresa operativa<strong>{PC_TENANT.name}</strong></label>
+    <label>Empresa operativa<strong>{profile.name}</strong></label>
     {workspace==="admin"&&<div className="ops-toolbar-note">Los catálogos operativos se consultan desde Firestore por empresa. En Demo se crean en memoria y no quedan guardados.</div>}
    </div>
    {workspace==='admin'&&!demoMode&&<div className="ops-auth">
@@ -708,7 +710,7 @@ export default function Operations({workspace='admin'}:{workspace?:Workspace}){
     <button className="ops-primary" disabled={busy} onClick={()=>void work(downloadProtectedPurchases)}>Descargar compras de {site.toUpperCase()} (CSV autorizado)</button>
     <p className="ops-hint">La exportación corresponde únicamente a la empresa de esta instalación. Las tablas y el contrato incremental para RAW → CORE → MART aún requieren certificación del dominio Procesos.</p>
    </section>}
-   {tab==='kpis'&&<section className="ops-card"><h3>Alcance del reporte</h3><p>{PC_TENANT.name}</p></section>}
+   {tab==='kpis'&&<section className="ops-card"><h3>Alcance del reporte</h3><p>{profile.name}</p></section>}
    <footer className="ops-footer">Business Transformation · Vista de prueba · Producción y Conteo sin cambios</footer>
   </main>
  </div>;

@@ -158,3 +158,15 @@ test('foreign batch IDs cannot be used to register production',async()=>{
  assert.equal(rejected.status,400);
  assert.equal(collectionData('pc_activities').has('foreign-batch_cook'),false);
 });
+
+
+test('company profile loads only its configured site and validates name-only writes',()=>{
+ const company=loadTypeScript('src/lib/pc-company.ts',{'./pc-tenant':tenant});
+ assert.deepEqual(company.readCompanyProfile(undefined),{siteId:'htl',name:'Hot Tacos Leamington',configured:false});
+ assert.deepEqual(company.readCompanyProfile({siteId:'htl',name:'Leamington Test'}),{siteId:'htl',name:'Leamington Test',configured:true});
+ assert.throws(()=>company.readCompanyProfile({siteId:'htw',name:'Windsor'}),/COMPANY_SITE_MISMATCH/);
+ assert.equal(company.readCompanyUpdate({name:' Renamed '}),'Renamed');
+ assert.throws(()=>company.readCompanyUpdate({name:'Windsor',siteId:'htw'}),/INVALID_COMPANY_UPDATE/);
+ assert.throws(()=>company.readCompanyUpdate({name:'',firebaseProjectId:'other'}),/INVALID_COMPANY_UPDATE/);
+ assert.throws(()=>company.readCompanyUpdate({name:' '}),/INVALID_COMPANY_NAME/);
+});

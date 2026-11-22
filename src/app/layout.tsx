@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import {PC_TENANT} from '@/lib/pc-tenant';
+import {CompanyProfileProvider} from './company-profile';
 
 const siteUrl = process.env.NEXT_PUBLIC_PC_APP_URL || (PC_TENANT.id==='htl'?'https://production-control-sable.vercel.app':`https://${PC_TENANT.id}.inventory-control.nixinx.app`);
 const title = `${PC_TENANT.name} | Production Control`;
@@ -59,7 +60,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="es" translate="no">
       <head><meta name="google" content="notranslate" /></head>
-      <body>{children}</body>
+      <body><CompanyProfileProvider>{children}</CompanyProfileProvider></body>
     </html>
   );
 }

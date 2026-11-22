@@ -15,3 +15,7 @@ Site ID is fixed at build/deployment time, not a user choice. Operational, catal
 ## Release gate
 
 Run lint, production build and the isolated regression tests; verify HTL's records and all flows against the existing configuration without writing test data to production. Validate denial of foreign site IDs and backend credentials mismatch. Do not merge if verification fails. Vercel transfer, DNS, project privacy and commercial license enforcement are separate stages; existing workflows and production configuration remain unchanged.
+
+## Basic company settings
+
+The `/company-settings` page uses the existing authenticated superadmin/active-admin authorization. The single document `pc_settings/company` stores `siteId`, `name`, `updatedAt`, and `updatedBy` in the already connected client Firestore. The ID is immutable from UI/API; the request accepts only a name. GET exposes only the display name, fixed site ID and configured flag; no payment or infrastructure credentials. If the document does not yet exist the existing deployment name appears, and the first authorized save creates it. No automatic production writes occur on read. Preview writes are forbidden. The operational UI reads the saved profile on load and refreshes the name after a save, without changing any operational filters or records. Advanced settings, payment and Control integration are deferred.
