@@ -1,12 +1,13 @@
 import {PC_UNITS} from './pc-units';
+import {PC_TENANT,isTenantSite} from './pc-tenant';
 /**
  * NIXINX Operations — first internal-process provider contract (candidate).
  * Independent from pc_products, pc_inputs, pc_counts and pc_movements.
  * A company/site owns each fact. Never use a shared product master across sites.
  */
-export const OPS_SITES = ['htl','htw','htft'] as const;
-export type OpsSite = typeof OPS_SITES[number];
-export const isOpsSite = (x:unknown):x is OpsSite => typeof x==='string' && OPS_SITES.some(s=>s===x);
+export const OPS_SITES = [PC_TENANT.id] as const;
+export type OpsSite = string;
+export const isOpsSite = isTenantSite;
 export const OPS_UNITS = PC_UNITS.map(unit=>unit.id);
 export type OpsUnit = (typeof PC_UNITS)[number]['id'];
 export const OPS_MEASURE_TYPES = ['mass','volume','count'] as const;

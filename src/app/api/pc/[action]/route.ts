@@ -36,8 +36,8 @@ type ScopedRow = Record<string, unknown> & {id:string};
 
 function scopedDocs(snap:FirebaseFirestore.QuerySnapshot,siteId:Site|null,kind:'siteId'|'siteIds'):ScopedRow[]{
  const rows:ScopedRow[]=snap.docs.map(d=>({...(d.data() as Record<string, unknown>),id:d.id}));
- if(!siteId)return rows;
- return rows.filter(row=>kind==='siteId'?row.siteId===siteId:Array.isArray(row.siteIds)&&row.siteIds.includes(siteId));
+ if(!siteId||!safeSite(siteId))return [];
+ return rows.filter(row=>kind==='siteId'?row.siteId===siteId:Array.isArray(row.siteIds)&&row.siteIds.includes(siteId)).map(row=>kind==='siteIds'?{...row,siteIds:[siteId]}:row);
 }
 
 /** Period filters are applied by Firestore BEFORE documents are retrieved. */
@@ -85,25 +85,27 @@ export async function POST(req:NextRequest,context:Context){try{
  const {action}=await context.params;
   requireSameOrigin(req);
  const payload=await req.json() as Record<string,unknown>;
+ if(payload.siteId!==undefined&&!safeSite(payload.siteId))throw new Error('INVALID_SITE');
  const store=db();
  if(action==='catalog'){
   const kind=payload.kind, name=text(payload.name), sites=payload.siteIds;
   if(name.length<2||!validSites(sites))throw new Error('INVALID_CATALOG');
   const active=payload.active!==false;
   const branch=payload.siteId;
-  if(!safeSite(branch)||!sites.includes(branch))throw new Error('INVALID_SITE');
+  if(!safeSite(branch)||sites.length!==1||sites[0]!==branch)throw new Error('INVALID_SITE');
+  let persistedSites=sites;
   const existingId=typeof payload.id==='string'&&/^[\w-]{5,80}$/.test(payload.id)?payload.id:null;
-  if(!existingId){if(sites.length!==1||sites[0]!==branch)throw new Error('INVALID_SITE');}
-  else {
+  if(existingId){
    const collection=kind==='staff'?'pc_staff':'pc_products';
    const prior=await store.collection(collection).doc(existingId).get();
    const old=prior.data();
    if(!old||!validSites(old.siteIds)||!old.siteIds.includes(branch))throw new Error('FORBIDDEN');
-   if(sites.length!==old.siteIds.length||!sites.every(s=>old.siteIds.includes(s)))throw new Error('INVALID_SITE');
+   // Preserve historical membership fields without accepting cross-company assignments from the client.
+   persistedSites=old.siteIds;
   }
   if(kind==='staff'){
    const id=typeof payload.id==='string'&&/^[\w-]{5,80}$/.test(payload.id)?payload.id:newId();
-   await store.collection('pc_staff').doc(id).set({name,siteIds:sites,active,updatedAt:stamp()},{merge:true});
+   await store.collection('pc_staff').doc(id).set({name,siteIds:persistedSites,active,updatedAt:stamp()},{merge:true});
    return NextResponse.json({ok:true,id});
   }
   if(kind==='product'){
@@ -129,7 +131,7 @@ export async function POST(req:NextRequest,context:Context){try{
       !Number.isInteger(minDays)||minDays<0||minDays>=targetDays
    ))throw new Error('INVALID_PLANNING_CONFIG');
    const processVersion=productKind==='finished'?((Number(previous?.processVersion)||0)+(previous?.preparationProcess===process?0:1)):undefined;
-   await store.collection('pc_products').doc(id).set({name:productKind==='ingredient'?name.toLocaleUpperCase('es-CA'):name,kind:productKind,category:text(previous?.category,40)||'other',defaultUnit,bagWeightKg:productKind==='finished'?weight:null,bagSize:productKind==='finished'?size:null,bagUnit:productKind==='finished'?bagUnit:null,siteIds:sites,active,countable,
+   await store.collection('pc_products').doc(id).set({name:productKind==='ingredient'?name.toLocaleUpperCase('es-CA'):name,kind:productKind,category:text(previous?.category,40)||'other',defaultUnit,bagWeightKg:productKind==='finished'?weight:null,bagSize:productKind==='finished'?size:null,bagUnit:productKind==='finished'?bagUnit:null,siteIds:persistedSites,active,countable,
     ...(productKind==='finished'?{targetDays,minDays,preparationProcess:process??'',processVersion,...(existingId?{leadDays:FieldValue.delete(),supplierLeadDays:FieldValue.delete(),wholeUnitRawKg:FieldValue.delete(),expectedYieldPct:FieldValue.delete()}: {})}:{}),updatedAt:stamp()},{merge:true});
    return NextResponse.json({ok:true,id});
   }
@@ -311,6 +313,7 @@ export async function POST(req:NextRequest,context:Context){try{
    const ref=store.collection('pc_activities').doc(`${batchId}_${worker.id}`),revision=ref.collection('revisions').doc();
    await store.runTransaction(async tx=>{
     const current=await tx.get(ref),data=current.data();
+    if(data&&!safeSite(data.siteId))throw new Error('FORBIDDEN');
     const previous:Array<Interval>=Array.isArray(data?.intervals)?data.intervals:[];
     if(JSON.stringify(previous)!==JSON.stringify(original))throw new Error('CONFLICT');
     // Removing the final interval is a valid correction; an already-empty timer is a no-op.
@@ -331,6 +334,7 @@ export async function POST(req:NextRequest,context:Context){try{
    const activity=store.collection('pc_activities').doc(`${batchId}_${employee.id}`);
    await store.runTransaction(async tx=>{
     const previous=await tx.get(activity);const value=previous.data();
+    if(value&&!safeSite(value.siteId))throw new Error('FORBIDDEN');
     const intervals:Array<{startedAt:string;stoppedAt:string|null}>=Array.isArray(value?.intervals)?[...value.intervals]:[];
     if(action==='start'){
      if(value?.running===true)throw new Error('ALREADY_RUNNING');
@@ -367,8 +371,8 @@ export async function POST(req:NextRequest,context:Context){try{
    const outputAmount=direct?directAmount:productQuantity(bagCount,partialAmount,pack.bagSize),outputKg=asKg(outputAmount,pack.bagUnit),partialKg=asKg(partialAmount,pack.bagUnit);
    if(outputAmount<=0)throw new Error('INVALID_OUTPUT');
    const running=await store.collection('pc_activities').where('batchId','==',batchId).get();
-   if(running.docs.some(doc=>doc.data().running===true))throw new Error('TIMERS_RUNNING');
-   await store.runTransaction(async tx=>{const fresh=await tx.get(ref);if(fresh.data()?.status!=='active')throw new Error('CONFLICT');tx.update(ref,{status:'completed',bagCount,partialKg,partialAmount,outputAmount,outputUnit:pack.bagUnit,bagSizeSnapshot:pack.bagSize,bagUnitSnapshot:pack.bagUnit,bagWeightKgSnapshot:pack.bagWeightKg,outputKg,equivalentBags:direct?0:outputAmount/pack.bagSize,completedById:employee.id,completedByName:employee.name,completedAt:stamp(),updatedAt:stamp()});});
+   if(running.docs.some(doc=>doc.data().siteId===site&&doc.data().running===true))throw new Error('TIMERS_RUNNING');
+   await store.runTransaction(async tx=>{const fresh=await tx.get(ref);if(fresh.data()?.status!=='active'||fresh.data()?.siteId!==site)throw new Error('CONFLICT');tx.update(ref,{status:'completed',bagCount,partialKg,partialAmount,outputAmount,outputUnit:pack.bagUnit,bagSizeSnapshot:pack.bagSize,bagUnitSnapshot:pack.bagUnit,bagWeightKgSnapshot:pack.bagWeightKg,outputKg,equivalentBags:direct?0:outputAmount/pack.bagSize,completedById:employee.id,completedByName:employee.name,completedAt:stamp(),updatedAt:stamp()});});
    await audit('batch.finish',site,employee,{batchId,bagCount,partialAmount,outputAmount,outputUnit:pack.bagUnit});return NextResponse.json({ok:true});
   }
  }
