@@ -17,6 +17,7 @@ At baseline `main` SHA `2a72d6c`, the app has global `src/lib/firebase.ts`, `pc-
 
 ## This PR — phase A
 - Defines product-specific hostname parsing, strict tenant registry response validation and credential/project binding.
+- Provides explicit, **not-yet-wired** named Firebase Admin/Browser factories using tenant-specific projects and secret references, rejecting project mismatch before initialization. No default Firebase Admin project.
 - Denies unrecognized or mismatched domains/tenant records; tests 100 customer hostnames from one product.
 - Adds no live domain routing, Firebase switching, Control API calls, secret retrieval, deployments or production variable changes.
 - This phase alone is NOT end-to-end tenant isolation; this is intentionally not exposed as a working multi-tenant API.
