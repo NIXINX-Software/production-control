@@ -19,9 +19,9 @@ export function parseTenantDomain(host:unknown,appSlug:unknown,apex='nixinx.app'
  if(!LABEL.test(tenant)||RESERVED.has(tenant)||tenant.length>63||product!==appSlug||root.join('.')!==apex)throw new Error('TENANT_DOMAIN_INVALID');
  return {hostname:raw,tenantSlug:tenant,appSlug};
 }
-export function selectTenantByHost(host:unknown,appSlug:string,lookup:(hostname:string)=>{hostname:string;tenantId:string;appId:string;enabled:boolean}|null){
+export function selectTenantByHost(host:unknown,appSlug:string,lookup:(hostname:string)=>{hostname:string;companySlug:string;tenantId:string;appId:string;enabled:boolean}|null){
  const parsed=parseTenantDomain(host,appSlug);
  const registered=lookup(parsed.hostname);
- if(!registered||registered.enabled!==true||registered.hostname!==parsed.hostname||registered.tenantId!==parsed.tenantSlug||registered.appId!==parsed.appSlug)throw new Error('TENANT_NOT_AUTHORIZED');
+ if(!registered||registered.enabled!==true||registered.hostname!==parsed.hostname||registered.companySlug!==parsed.tenantSlug||typeof registered.tenantId!=='string'||!/^[A-Za-z0-9_-]{2,80}$/.test(registered.tenantId)||registered.appId!==parsed.appSlug)throw new Error('TENANT_NOT_AUTHORIZED');
  return {hostname:parsed.hostname,tenantId:registered.tenantId,appId:registered.appId};
 }

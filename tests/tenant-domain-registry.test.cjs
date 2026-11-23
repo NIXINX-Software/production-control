@@ -31,15 +31,15 @@ test('reject different app, root hostname, malicious hosts, and user-controlled 
 });
 test('unknown or mismatched registry record cannot access another client',()=>{
  const h='htl.inventory-control.nixinx.app';
- const valid={hostname:h,tenantId:'htl',appId:'inventory-control',enabled:true};
- assert.deepEqual(domain.selectTenantByHost(h,'inventory-control',()=>valid),{hostname:h,tenantId:'htl',appId:'inventory-control'});
- for(const r of [null,{...valid,enabled:false},{...valid,tenantId:'htw'},{...valid,hostname:'htw.inventory-control.nixinx.app'},{...valid,appId:'supply'}]){
+ const valid={hostname:h,companySlug:'htl',tenantId:'client_HotTacosLeamington',appId:'inventory-control',enabled:true};
+ assert.deepEqual(domain.selectTenantByHost(h,'inventory-control',()=>valid),{hostname:h,tenantId:'client_HotTacosLeamington',appId:'inventory-control'});
+ for(const r of [null,{...valid,enabled:false},{...valid,companySlug:'htw'},{...valid,hostname:'htw.inventory-control.nixinx.app'},{...valid,appId:'supply'}]){
   assert.throws(()=>domain.selectTenantByHost(h,'inventory-control',()=>r),/TENANT_NOT_AUTHORIZED/);
  }
 });
 test('per-client Firebase client and server identities must match registry',()=>{
  const h='htw.inventory-control.nixinx.app';
- const valid={hostname:h,tenantId:'htw',appId:'inventory-control',firebaseProjectId:'htw-firebase',
+ const valid={hostname:h,companySlug:'htw',tenantId:'client_HotTacosWindsor',appId:'inventory-control',firebaseProjectId:'htw-firebase',
   enabled:true,client:{apiKey:'test',authDomain:'htw.firebaseapp.com',projectId:'htw-firebase',appId:'app-htw'},
   serverCredentialSecretRef:'control/htw/firebase-admin'};
  const checked=connection.validateTenantConnection(h,'inventory-control',valid);
