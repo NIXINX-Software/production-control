@@ -18,6 +18,8 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
+      - name: Verify tenant domain and registry contract
+        run: node --test tests/tenant-domain-registry.test.cjs tests/tenant-firebase-admin.test.cjs
       - name: Lint
         run: npm run lint
       - name: Production build verification
