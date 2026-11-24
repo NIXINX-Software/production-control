@@ -22,6 +22,7 @@ function loadTypeScript(file,modules){
  const fn=vm.runInThisContext(`(function(require,module,exports){${transpiled}\n})`,{filename:file});
  fn(loader,{exports},exports);return exports;
 }
+const tenant=loadTypeScript('src/lib/pc-tenant.ts',{});
 const units=loadTypeScript('src/lib/pc-units.ts',{});
 const presentation=loadTypeScript('src/lib/pc-presentation.ts',{});
 const collections=new Map();let sequence=0;
@@ -46,10 +47,10 @@ const server={
  audit:async()=>{},db:()=>store,findEmployee:async(id)=>({id:String(id),name:'Cocinero de prueba'}),
  newId:()=>`testid_${++sequence}`,operationalToday:()=> '2026-11-04',
  requireSameOrigin:()=>{},requireCorrectionCode:()=>{},requireSuperAdmin:async()=>{},
- safeSite:x=>x==='htl',stamp:()=>new Date('2026-11-04T15:00:00Z').toISOString(),
+ safeSite:tenant.isTenantSite,stamp:()=>new Date('2026-11-04T15:00:00Z').toISOString(),
  text:(v,max)=>typeof v==='string'?v.trim().slice(0,max||1000):'',
  validDate:v=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v),
- validSites:v=>Array.isArray(v)&&v.length>0&&v.every(x=>x==='htl'),
+ validSites:v=>Array.isArray(v)&&v.length>0&&v.every(tenant.isSiteId),
 };
 const response={json(body,options={}){return {status:options.status??200,body};}};
 const route=loadTypeScript('src/app/api/pc/[action]/route.ts',{
@@ -117,4 +118,55 @@ test('Export: no-count marinade absent from Existencias but retained in producti
  const dimension=noCountReport.tables.find(x=>x.file==='dim_productos.csv');
  assert.equal(dimension.headers.length,10);
  assert(dimension.rows.every(row=>row[0]===1));
+});
+
+
+test('tenant configuration preserves HTL and supports new companies without source edits',()=>{
+ assert.deepEqual(tenant.resolveTenant(undefined,undefined),{id:'htl',name:'Hot Tacos Leamington'});
+ assert.deepEqual(tenant.resolveTenant('htw','Hot Tacos Windsor'),{id:'htw',name:'Hot Tacos Windsor'});
+ assert.deepEqual(tenant.resolveTenant('new-company','New Company'),{id:'new-company',name:'New Company'});
+ assert.throws(()=>tenant.resolveTenant('htw',undefined),/PC_TENANT_NOT_CONFIGURED/);
+ assert.throws(()=>tenant.resolveTenant('invalid/id','Test'),/PC_TENANT_NOT_CONFIGURED/);
+});
+test('catalog write rejects foreign tenant and multi-company assignment',async()=>{
+ const foreign=await post('catalog',{...common,siteId:'htw',siteIds:['htw'],name:'Foreign company',productKind:'ingredient',defaultUnit:'kg'});
+ assert.equal(foreign.status,400);
+ const multiple=await post('catalog',{...common,siteIds:['htl','htw'],name:'Cross-company',productKind:'ingredient',defaultUnit:'kg'});
+ assert.equal(multiple.status,400);
+});
+test('existing shared catalog record retains original metadata on an HTL-only edit',async()=>{
+ const id='legacy-shared';
+ await makeDoc('pc_products',id).set({name:'Legacy',kind:'ingredient',active:true,siteIds:['htl','htw'],defaultUnit:'kg'});
+ const response=await post('catalog',{...common,id,name:'Legacy edited',productKind:'ingredient',defaultUnit:'kg'});
+ assert.equal(response.status,200);
+ assert.deepEqual(collectionData('pc_products').get(id).siteIds,['htl','htw']);
+});
+
+
+test('tenant guard rejects foreign site IDs; operations shares the same guard',()=>{
+ const ops=loadTypeScript('src/lib/ops-contract.ts',{'./pc-units':units,'./pc-tenant':tenant});
+ assert.equal(tenant.isTenantSite('htl'),true);
+ assert.equal(tenant.isTenantSite('htw'),false);
+ assert.equal(tenant.isTenantSite('htft'),false);
+ assert.equal(ops.isOpsSite('htl'),true);
+ assert.equal(ops.isOpsSite('htw'),false);
+ assert.equal(ops.isOpsSite(undefined),false);
+});
+test('foreign batch IDs cannot be used to register production',async()=>{
+ await makeDoc('pc_batches','foreign-batch').set({siteId:'htw',status:'active',productId:'carnitas',operationalDate:'2026-11-04'});
+ const rejected=await post('start',{batchId:'foreign-batch',employeeId:'cook'});
+ assert.equal(rejected.status,400);
+ assert.equal(collectionData('pc_activities').has('foreign-batch_cook'),false);
+});
+
+
+test('company profile loads only its configured site and validates name-only writes',()=>{
+ const company=loadTypeScript('src/lib/pc-company.ts',{'./pc-tenant':tenant});
+ assert.deepEqual(company.readCompanyProfile(undefined),{siteId:'htl',name:'Hot Tacos Leamington',configured:false});
+ assert.deepEqual(company.readCompanyProfile({siteId:'htl',name:'Leamington Test'}),{siteId:'htl',name:'Leamington Test',configured:true});
+ assert.throws(()=>company.readCompanyProfile({siteId:'htw',name:'Windsor'}),/COMPANY_SITE_MISMATCH/);
+ assert.equal(company.readCompanyUpdate({name:' Renamed '}),'Renamed');
+ assert.throws(()=>company.readCompanyUpdate({name:'Windsor',siteId:'htw'}),/INVALID_COMPANY_UPDATE/);
+ assert.throws(()=>company.readCompanyUpdate({name:'',firebaseProjectId:'other'}),/INVALID_COMPANY_UPDATE/);
+ assert.throws(()=>company.readCompanyUpdate({name:' '}),/INVALID_COMPANY_NAME/);
 });

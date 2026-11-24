@@ -3,8 +3,8 @@ import {db, operationalToday, safeSite, type Site} from '@/lib/pc-server';
 import {lineKg} from '@/lib/pc-weights';
 import type {EmployeeKpi, ManagementAlert, ManagementData, ManagementSummary, ProductKpi, SiteKpi, TrendPoint} from '@/lib/pc-management';
 
-const SITE_NAMES:Record<Site,string>={htl:'Hot Tacos Leamington',htw:'Hot Tacos Windsor',htft:'Hot Tacos Food Truck'};
-const SITES:Site[]=['htl','htw','htft'];
+import {PC_TENANT} from './pc-tenant';
+const SITES:Site[]=[PC_TENANT.id];
 
 type Row=Record<string,unknown>&{id:string};
 
@@ -79,7 +79,7 @@ export async function buildManagementData(filter?:{from?:string;to?:string}):Pro
   store.collection('pc_products').where('kind','==','finished').get(),
  ]);
  const docs=(snap:FirebaseFirestore.QuerySnapshot):Row[]=>snap.docs.map(d=>({...d.data(),id:d.id}));
- const counts=docs(countSnap),batches=docs(batchSnap);const batchIds=new Set(batches.map(x=>x.id));const activities=docs(activitySnap).filter(x=>batchIds.has(s(x.batchId)));const inputs=docs(inputSnap).filter(x=>batchIds.has(s(x.batchId))); 
+ const counts=docs(countSnap).filter(x=>safeSite(x.siteId)),batches=docs(batchSnap).filter(x=>safeSite(x.siteId));const batchIds=new Set(batches.map(x=>x.id));const activities=docs(activitySnap).filter(x=>safeSite(x.siteId)&&batchIds.has(s(x.batchId)));const inputs=docs(inputSnap).filter(x=>safeSite(x.siteId)&&batchIds.has(s(x.batchId))); 
 
  const movesByKey=new Map<string,number>();for(const movement of docs(moveSnap)){if(!safeSite(movement.siteId)||typeof movement.operationalDate!=='string'||typeof movement.productId!=='string')continue;const mk=`${movement.siteId}:${movement.operationalDate}:${movement.productId}`;movesByKey.set(mk,(movesByKey.get(mk)??0)+n(movement.quantityKg));}
  const completedByKey=new Map<string,number>();
@@ -107,7 +107,7 @@ export async function buildManagementData(filter?:{from?:string;to?:string}):Pro
   }
  }
 
- const bySite:SiteKpi[]=SITES.map(siteId=>({siteId,siteName:SITE_NAMES[siteId],...summaryFor(siteId,counts,batches,activities,inputs,estimatedBySite)}));
+ const bySite:SiteKpi[]=SITES.map(siteId=>({siteId,siteName:PC_TENANT.name,...summaryFor(siteId,counts,batches,activities,inputs,estimatedBySite)}));
 
  const employeeMap=new Map<string,EmployeeKpi>();
  const batchSets=new Map<string,Set<string>>();
@@ -169,5 +169,5 @@ export async function buildManagementData(filter?:{from?:string;to?:string}):Pro
  }
  for(const siteId of SITES){const late=counts.filter(x=>x.siteId===siteId&&x.isLateEntry===true).length;if(late)alerts.push({kind:'late-entry',severity:'warning',siteId,title:'Capturas posteriores',detail:`${late} conteo(s) registrados después de la fecha operativa`});}
 
- return {generatedAt:new Date().toISOString(),productCatalog:docs(productSnap).filter(r=>r.active!==false&&r.countable!==false&&Array.isArray(r.siteIds)).map(r=>({id:r.id,name:s(r.name)||r.id,siteIds:r.siteIds as Site[]})),summary:summaryFor(undefined,counts,batches,activities,inputs,estimatedBySite),bySite,byEmployee,byProduct,trend,alerts:alerts.slice(0,30)};
+ return {generatedAt:new Date().toISOString(),productCatalog:docs(productSnap).filter(r=>r.active!==false&&r.countable!==false&&Array.isArray(r.siteIds)&&r.siteIds.includes(PC_TENANT.id)).map(r=>({id:r.id,name:s(r.name)||r.id,siteIds:[PC_TENANT.id]})),summary:summaryFor(undefined,counts,batches,activities,inputs,estimatedBySite),bySite,byEmployee,byProduct,trend,alerts:alerts.slice(0,30)};
 }

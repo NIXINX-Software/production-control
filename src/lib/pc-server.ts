@@ -6,10 +6,12 @@ import {getAuth} from 'firebase-admin/auth';
 import {FieldValue, getFirestore, type Firestore} from 'firebase-admin/firestore';
 import {isSuperAdminEmail} from '@/lib/super-admin';
 
-export type Site = 'htl' | 'htw' | 'htft';
-export const SITES: Site[] = ['htl', 'htw', 'htft'];
-export const safeSite = (value: unknown): value is Site => typeof value === 'string' && SITES.includes(value as Site);
-export const validSites = (value: unknown): value is Site[] => Array.isArray(value) && value.length > 0 && value.length <= 3 && value.every(safeSite) && new Set(value).size === value.length;
+import {PC_TENANT,isSiteId,isTenantSite} from './pc-tenant';
+export type Site = string;
+export const SITES: Site[] = [PC_TENANT.id];
+export const safeSite = isTenantSite;
+// Legacy membership arrays are read for compatibility; site access always also checks the configured tenant.
+export const validSites = (value: unknown): value is Site[] => Array.isArray(value) && value.length > 0 && value.length <= 3 && value.every(isSiteId) && new Set(value).size === value.length;
 export const text = (value: unknown, max = 120) => typeof value === 'string' ? value.trim().slice(0, max) : '';
 export const validDate = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T12:00:00Z`)) && new Date(`${value}T12:00:00Z`).toISOString().slice(0, 10) === value;
 export const operationalToday = () => pcOperationalDate();

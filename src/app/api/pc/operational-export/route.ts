@@ -28,7 +28,7 @@ export async function GET(req:NextRequest){
   // Firestore limits dates before fetching; no multi-year collection downloads.
   const between=(collection:string)=>store.collection(collection).where('operationalDate','>=',from).where('operationalDate','<=',to).get();
   const [p,s,c,b,i,a,m]=await Promise.all([store.collection('pc_products').get(),store.collection('pc_staff').get(),between('pc_counts'),between('pc_batches'),between('pc_inputs'),between('pc_activities'),between('pc_movements')]);
-  const products=asRows(p),staff=asRows(s);
+  const products:DocumentRow[]=asRows(p).filter(row=>Array.isArray(row.siteIds)&&row.siteIds.includes(site)).map(row=>({...row,siteIds:[site]})),staff:DocumentRow[]=asRows(s).filter(row=>Array.isArray(row.siteIds)&&row.siteIds.includes(site)).map(row=>({...row,siteIds:[site]}));
   if(productId&&!products.some(row=>row.id===productId&&Array.isArray(row.siteIds)&&row.siteIds.includes(site)&&row.kind==='finished'))throw new Error('INVALID_EXPORT_FILTER');
   const {sheets,tables}=buildOperationalReport({products,staff,counts:asRows(c),batches:asRows(b),inputs:asRows(i),activities:asRows(a),movements:asRows(m)}, {site,from,to,productId:productId||undefined,generatedAt:new Date().toISOString()});
   const base=`Production_Control_${filename(site)}_${from}_${to}${productId?'_producto':''}`;

@@ -1,5 +1,5 @@
 /** Contratos iniciales. No implican persistencia ni colecciones creadas. */
-export type SiteId = "htl" | "htw" | "htft";
+export type SiteId = string;
 export type ProductCategory = "protein" | "prepared" | "other";
 export type CountPeriod = "opening" | "closing";
 export type ActivityState = "running" | "paused" | "completed";

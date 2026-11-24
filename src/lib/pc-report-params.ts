@@ -1,11 +1,12 @@
 import {pcOperationalDate} from './pc-date';
 import {addDays,type ScenarioConfig,type DateRange} from './pc-forecast';
 import {validDate,safeSite} from './pc-server';
+import {PC_TENANT} from './pc-tenant';
 export function getConfig(params:URLSearchParams):ScenarioConfig{
  const today=pcOperationalDate();
  const historyTo=params.get('to')??today,historyFrom=params.get('from')??addDays(historyTo,-29);
  const baseTo=params.get('baseTo')??historyTo,baseFrom=params.get('baseFrom')??historyFrom;
- const siteId=params.get('site')??'htw',productId=params.get('product')??'';
+ const siteId=params.get('site')??PC_TENANT.id,productId=params.get('product')??'';
  const forecastDays=Number(params.get('days')??14);
  if(![historyTo,historyFrom,baseTo,baseFrom].every(validDate)||historyTo<historyFrom||baseTo<baseFrom||!safeSite(siteId)||!productId||productId.length>100||!Number.isInteger(forecastDays)||forecastDays<1||forecastDays>90)throw new Error('INVALID_REPORT_FILTER');
  const blockedUntil=params.get('blockedUntil')??undefined,blockReason=params.get('blockReason')??undefined;

@@ -1,9 +1,10 @@
 import type { MetadataRoute } from 'next';
+import {PC_TENANT} from '@/lib/pc-tenant';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Hot Tacos Production Control',
-    short_name: 'HT Production',
+    name: `${PC_TENANT.name} Production Control`,
+    short_name: PC_TENANT.id==='htl'?'HT Production':'Production Control',
     description: 'Conteo de inventario y control de producción',
     id: '/',
     start_url: '/',

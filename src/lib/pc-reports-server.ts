@@ -1,5 +1,5 @@
 import 'server-only';
-import {db} from './pc-server';
+import {db,safeSite} from './pc-server';
 import {addDays,buildScenario,deriveDaily,type BatchRecord,type CountRecord,type MovementRecord,type ProductConfig,type ScenarioConfig} from './pc-forecast';
 
 type AnyRow=Record<string,unknown>&{id:string};
@@ -8,6 +8,7 @@ const n=(v:unknown)=>Number.isFinite(Number(v))?Number(v):0;
 const round=(v:number)=>Math.round(v*1000)/1000;
 export type ReportPayload={scenario:ReturnType<typeof buildScenario>;product:ProductConfig;source:{counts:AnyRow[];batches:AnyRow[];inputs:AnyRow[];activities:AnyRow[];movements:AnyRow[]};metrics:{outputKg:number;laborHours:number;kgPerLaborHour:number|null;ingredientEntries:number;completedBatches:number}};
 export async function loadReport(config:ScenarioConfig):Promise<ReportPayload>{
+ if(!safeSite(config.siteId))throw new Error('INVALID_SITE');
  const store=db();
  const from=[config.historyFrom,config.baseFrom].sort()[0],to=[config.historyTo,config.baseTo].sort().at(-1)!;
  // Date-field range queries avoid scanning the entire history of counts and batches.
@@ -32,8 +33,8 @@ export async function loadReport(config:ScenarioConfig):Promise<ReportPayload>{
   store.collection('pc_inputs').where('operationalDate','>=',from).where('operationalDate','<=',to).get(),
   store.collection('pc_activities').where('operationalDate','>=',from).where('operationalDate','<=',to).get(),
  ]);
- const inputs=convert(inputSnap).filter(v=>batchIds.has(text(v.batchId)));
- const activities=convert(activitySnap).filter(v=>batchIds.has(text(v.batchId)));
+ const inputs=convert(inputSnap).filter(v=>v.siteId===config.siteId&&batchIds.has(text(v.batchId)));
+ const activities=convert(activitySnap).filter(v=>v.siteId===config.siteId&&batchIds.has(text(v.batchId)));
  const historical=deriveDaily(counts as CountRecord[],batches as BatchRecord[],config.siteId,config.productId,movements as MovementRecord[]);
  const inReportingRange=(date:unknown)=>typeof date==='string'&&date>=config.historyFrom&&date<=config.historyTo;
  const reportBatches=batches.filter(v=>inReportingRange(v.operationalDate));

@@ -1,4 +1,6 @@
 'use client';
+import {useCompanyProfile} from '../company-profile';
+import {PC_TENANT} from '@/lib/pc-tenant';
 import Link from 'next/link';
 import {pcOperationalDate} from '@/lib/pc-date';
 import {useCallback,useEffect,useMemo,useState,type CSSProperties} from 'react';
@@ -12,7 +14,6 @@ import './consulta.css';
 type Input={id:string;batchId:string;ingredientName:string;quantity:number;unit:string};
 type ResponseData={counts:ViewCount[];batches:ViewBatch[];inputs:Input[];movements:ViewMovement[];products:ViewProduct[]};
 type Mode='historico'|'simulacion';
-const locations=[{id:'htl',label:'Leamington'},{id:'htw',label:'Windsor'},{id:'htft',label:'Food Truck'}];
 const nowDay=()=>pcOperationalDate();
 const validDate=(s:string)=>/^\d{4}-\d{2}-\d{2}$/.test(s)&&!Number.isNaN(Date.parse(s+'T12:00:00Z'));
 const showQuantity=(n:number|null|undefined,u:string)=>n===null||n===undefined||!Number.isFinite(n)?'—':`${n.toLocaleString('es-CA',{maximumFractionDigits:3})} ${packUnitLabel(u)}`;
@@ -67,8 +68,10 @@ function TrendChart({series,mode,productName}:{series:ViewSeries;mode:Mode;produ
 
 
 export default function Consulta(){
+ const {profile}=useCompanyProfile();
  const [user,setUser]=useState<User|null>(null),[authReady,setAuthReady]=useState(false),[email,setEmail]=useState(''),[password,setPassword]=useState('');
- const [site,setSite]=useState('htl'),[from,setFrom]=useState(()=>shiftDay(nowDay(),-13)),[to,setTo]=useState(nowDay());
+ const site=PC_TENANT.id;
+ const [from,setFrom]=useState(()=>shiftDay(nowDay(),-13)),[to,setTo]=useState(nowDay());
  const [data,setData]=useState<ResponseData|null>(null),[loading,setLoading]=useState(false),[exporting,setExporting]=useState<'xlsx'|'datamart'|null>(null),[onlySelected,setOnlySelected]=useState(false),[error,setError]=useState('');
  const [productId,setProductId]=useState(''),[mode,setMode]=useState<Mode>('historico');
  useEffect(()=>{if(!auth){const timer=window.setTimeout(()=>setAuthReady(true),0);return()=>window.clearTimeout(timer);}return onAuthStateChanged(auth,u=>{setUser(u);setAuthReady(true);if(!u){setData(null);setProductId('');}});},[]);
@@ -107,11 +110,11 @@ export default function Consulta(){
  const selectedBatches=data?.batches.filter(b=>b.productId===productId&&b.operationalDate>=from&&b.operationalDate<=to)??[];
  const selectedMovements=data?.movements.filter(m=>m.productId===productId)??[];
  return <main className="pc-consulta">
-  <header className="pc-consulta-head"><div><p className="ux-eyebrow">HOT TACOS · PRODUCTION CONTROL</p><h1>Consulta operativa</h1><p className="ux-muted">Inventarios y producción por producto. Sin KPIs de Management.</p></div><Link href="/">← Cocina</Link></header>
+  <header className="pc-consulta-head"><div><p className="ux-eyebrow">{profile.name} · PRODUCTION CONTROL</p><h1>Consulta operativa</h1><p className="ux-muted">Inventarios y producción por producto. Sin KPIs de Management.</p></div><Link href="/">← Cocina</Link></header>
   {!authReady&&<p>Comprobando acceso…</p>}
   {authReady&&!user&&<section className="ux-paper pc-consulta-login"><h2>Acceso de consulta</h2><p>Tu cuenta debe estar habilitada con el rol <code>viewer</code> o <code>admin</code>.</p><form onSubmit={async e=>{e.preventDefault();if(!auth)return;setError('');try{await signInWithEmailAndPassword(auth,email,password);setPassword('');}catch(err){setError(err instanceof Error?err.message:String(err));}}}><label>Correo<input type="email" value={email} autoComplete="username" onChange={e=>setEmail(e.target.value)} required/></label><label>Contraseña<input type="password" value={password} autoComplete="current-password" onChange={e=>setPassword(e.target.value)} required/></label><button className="ux-main-button" type="submit">Entrar</button></form></section>}
   {user&&<>
-   <div className="pc-period"><label>Sucursal<select value={site} onChange={e=>{setSite(e.target.value);setData(null);setProductId('');}}>{locations.map(l=><option key={l.id} value={l.id}>{l.label}</option>)}</select></label><label>Desde<input type="date" value={from} onChange={e=>{setFrom(e.target.value);setData(null);}} max={nowDay()}/></label><label>Hasta<input type="date" value={to} onChange={e=>{setTo(e.target.value);setData(null);}} max={nowDay()}/></label><button className="ux-main-button" disabled={invalid||loading} onClick={()=>void load()}>{loading?'Consultando…':'Consultar periodo'}</button><button className="ux-secondary" onClick={()=>{if(auth)void signOut(auth);}}>Salir</button></div>
+   <div className="pc-period"><label>Sucursal<strong>{profile.name}</strong></label><label>Desde<input type="date" value={from} onChange={e=>{setFrom(e.target.value);setData(null);}} max={nowDay()}/></label><label>Hasta<input type="date" value={to} onChange={e=>{setTo(e.target.value);setData(null);}} max={nowDay()}/></label><button className="ux-main-button" disabled={invalid||loading} onClick={()=>void load()}>{loading?'Consultando…':'Consultar periodo'}</button><button className="ux-secondary" onClick={()=>{if(auth)void signOut(auth);}}>Salir</button></div>
    {data&&<>
     <section className="ux-paper pc-export-panel"><div><h2>Exportar información operativa</h2><p className="pc-consulta-subtitle">El Excel contiene existencias, conteos, producción, ingredientes, horas por empleado y movimientos. El ZIP contiene tablas CSV para Data Mart.</p></div><label className="pc-export-choice"><input type="checkbox" checked={onlySelected} onChange={e=>setOnlySelected(e.target.checked)} disabled={!selected}/> Exportar solo el producto seleccionado (por defecto: toda la sucursal)</label><div className="pc-export-buttons"><button className="ux-main-button" type="button" disabled={!!exporting} onClick={()=>void download('xlsx')}>{exporting==='xlsx'?'Generando Excel…':'Descargar Excel operativo (.xlsx)'}</button><button className="ux-secondary" type="button" disabled={!!exporting} onClick={()=>void download('datamart')}>{exporting==='datamart'?'Generando datos…':'Descargar datos Data Mart (.zip)'}</button></div><p className="pc-export-note">El Excel incluye columnas para capturar existencias verificadas. Ninguna descarga modifica los conteos guardados. Se utiliza el periodo y la sucursal consultados.</p></section>
     <section className="ux-paper"><div className="pc-chart-actions"><div><h2>Comportamiento del inventario</h2><p className="pc-consulta-subtitle">Selecciona la proteína o producto terminado que deseas analizar.</p></div></div>
